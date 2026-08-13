@@ -8,7 +8,7 @@ const LAST_SYNC_KEY = 'quickrev_ct_last_sync';
 // Safety cap: a broad Canada Tire sync can return thousands of tires, which
 // freezes the app when rendered. Import at most this many per sync; the UI
 // tells the user to narrow filters (size/brand/warehouse) to get more.
-const MAX_SYNC_TIRES = 500;
+const MAX_SYNC_TIRES = 6000;
 
 // ========== CSV NORMALIZATION ==========
 const SEASON_MAP = {
@@ -313,42 +313,31 @@ export function useTireData() {
     });
   }, []);
 
-  // Sync every known warehouse's inventory and merge the results. Each
-  // warehouse sync only replaces that warehouse's tires, so nothing is lost.
+    // Sync the full Canada Tire catalog. The RESTlet ignores size/location
+  // filters and returns its complete catalog (with per-warehouse inventory)
+  // in every response, so a single unfiltered call gets everything — there
+  // is no need to call it once per warehouse.
   const syncAllWarehouses = useCallback(async () => {
     if (syncingRef.current) return { success: false, error: 'A sync is already running.' };
-    let locs = warehouseLocations;
-    if (locs.length === 0) {
-      const fetched = await fetchWarehouseLocations();
-      locs = fetched.length ? fetched : locs;
-    }
-    if (locs.length === 0) return { success: false, error: 'No warehouses discovered yet — run a single sync first.' };
-
     syncingRef.current = true;
     setSyncAllRunning(true);
-    let total = 0;
-    const failures = [];
-    for (let i = 0; i < locs.length; i++) {
-      const loc = locs[i];
-      setSyncProgress({ running: true, current: i + 1, total: locs.length, location: loc });
-      const result = await syncCanadaTire({ location: loc });
-      if (result.success) total += result.count;
-      else failures.push(loc);
-    }
-    // Collapse duplicate part numbers across warehouses into single entries
+    setSyncProgress({ running: true, current: 1, total: 1, location: 'All Warehouses' });
+    const result = await syncCanadaTire({});
+    // Collapse duplicate part numbers (defensive; a fresh sync is already unique)
     mergePartsByNumber();
     syncingRef.current = false;
     setSyncAllRunning(false);
-    setSyncProgress({ running: false, done: locs.length - failures.length, total: locs.length, failed: failures.length });
+    setSyncProgress({ running: false, done: result.success ? 1 : 0, total: 1, failed: result.success ? 0 : 1 });
     // Let the header show the finished state briefly, then clear it
     setTimeout(() => setSyncProgress(null), 8000);
     return {
-      success: failures.length < locs.length,
-      count: total,
-      warehouses: locs.length,
-      failures,
+      success: result.success,
+      count: result.success ? result.count : 0,
+      warehouses: 1,
+      failures: result.success ? [] : [],
+      error: result.error,
     };
-  }, [warehouseLocations, fetchWarehouseLocations, syncCanadaTire, mergePartsByNumber]);
+  }, [syncCanadaTire, mergePartsByNumber]);
 
   // Bulk-update multiple tires at once (bulk edit on the search panel).
   // Handles distributor changes (recompute tier per brand) and price
@@ -492,6 +481,35 @@ export function useTireData() {
     setTires(sample);
   }, []);
 
+
+  // Export a full backup of the inventory (for moving data between devices
+  // or browsers — the app stores data in each browser's localStorage).
+  const exportData = useCallback(() => ({
+    exportedAt: new Date().toISOString(),
+    tires,
+    warehouseLocations,
+    lastSyncAt,
+  }), [tires, warehouseLocations, lastSyncAt]);
+
+  // Restore a backup created by exportData (replaces current inventory).
+  const importData = useCallback((json) => {
+    try {
+      const data = typeof json === 'string' ? JSON.parse(json) : json;
+      if (!data || !Array.isArray(data.tires)) {
+        return { success: false, error: 'Invalid backup file — expected a QuickRev export.' };
+      }
+      const imported = data.tires.filter(t => t && t.brand && t.size);
+      setTires(imported);
+      if (Array.isArray(data.warehouseLocations) && data.warehouseLocations.length) {
+        setWarehouseLocations(prev => [...new Set([...prev, ...data.warehouseLocations])].sort());
+      }
+      if (data.lastSyncAt) setLastSyncAt(data.lastSyncAt);
+      return { success: true, count: imported.length };
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
+  }, []);
+
   const getDistributorName = useCallback((id) => {
     return DISTRIBUTORS.find(d => d.id === id)?.name || id;
   }, []);
@@ -513,6 +531,8 @@ export function useTireData() {
     importFromCSV,
     loadSampleData,
     getDistributorName,
+    exportData,
+    importData,
     syncCanadaTire,
     syncAllWarehouses,
     syncAllRunning,

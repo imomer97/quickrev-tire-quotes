@@ -20,6 +20,8 @@ export default function App() {
     loadSampleData,
     syncCanadaTire,
     syncAllWarehouses,
+    exportData,
+    importData,
     syncAllRunning,
     syncProgress,
     checkApiHealth,
@@ -68,6 +70,8 @@ export default function App() {
             lastSyncAt={lastSyncAt}
             addWarehouseLocations={addWarehouseLocations}
             fetchWarehouseLocations={fetchWarehouseLocations}
+            exportData={exportData}
+            importData={importData}
           />
         )}
       </main>

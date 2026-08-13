@@ -1,17 +1,19 @@
 import { useState, useRef, useEffect } from 'react';
-import { Upload, Trash2, Database, AlertCircle, CheckCircle, RefreshCw, Search } from 'lucide-react';
+import { Upload, Trash2, Database, AlertCircle, CheckCircle, RefreshCw, Search, Download } from 'lucide-react';
 import Papa from 'papaparse';
 
-export default function ImportPanel({ tires, importFromCSV, clearAll, loadSampleData, deleteTires, syncCanadaTire, syncAllWarehouses, syncAllRunning, checkApiHealth, apiStatus, isLoading, warehouseLocations, lastSyncAt, fetchWarehouseLocations, addWarehouseLocations }) {
+export default function ImportPanel({ tires, importFromCSV, clearAll, loadSampleData, deleteTires, syncCanadaTire, syncAllWarehouses, syncAllRunning, checkApiHealth, apiStatus, isLoading, warehouseLocations, lastSyncAt, fetchWarehouseLocations, addWarehouseLocations, exportData, importData }) {
   const [dragActive, setDragActive] = useState(false);
   const [importResult, setImportResult] = useState(null);
   const [selectedRows, setSelectedRows] = useState(new Set());
   const [syncResult, setSyncResult] = useState(null);
   const [syncFilters, setSyncFilters] = useState({ size: '', brand: '', isWinter: '', warehouse: '' });
-  const [confirmAction, setConfirmAction] = useState(null); // { type: 'deleteSelected' | 'clearAll' }
+  const [confirmAction, setConfirmAction] = useState(null); // { type: 'deleteSelected' | 'clearAll' | 'importBackup' }
+  const [pendingImport, setPendingImport] = useState(null); // backup text awaiting confirm
   const [page, setPage] = useState(1);
   const ROWS_PER_PAGE = 100;
   const fileInputRef = useRef(null);
+  const jsonInputRef = useRef(null);
 
   useEffect(() => {
     checkApiHealth();
@@ -68,6 +70,13 @@ export default function ImportPanel({ tires, importFromCSV, clearAll, loadSample
       clearAll();
       setSelectedRows(new Set());
       setImportResult({ type: 'success', message: 'All tire data cleared' });
+    } else if (confirmAction.type === 'importBackup' && pendingImport) {
+      const result = importData(pendingImport);
+      setSelectedRows(new Set());
+      setImportResult(result.success
+        ? { type: 'success', message: `Restored ${result.count} tires from backup` }
+        : { type: 'error', message: result.error });
+      setPendingImport(null);
     }
     setConfirmAction(null);
     setTimeout(() => setImportResult(null), 4000);
@@ -120,7 +129,7 @@ export default function ImportPanel({ tires, importFromCSV, clearAll, loadSample
     const result = await syncCanadaTire(filters);
     if (result.success) {
       const extra = result.truncated
-        ? ` — limited to ${result.count}. Add size, brand, or warehouse filters to sync more.`
+        ? ' — Canada Tire returned more tires than the app stores; only the imported ones were kept.'
         : '';
       setSyncResult({ type: 'success', message: `Synced ${result.count} tires from Canada Tire API${extra}` });
       if (result.locations?.length) addWarehouseLocations(result.locations);
@@ -135,7 +144,7 @@ export default function ImportPanel({ tires, importFromCSV, clearAll, loadSample
     setSyncResult(null);
     const result = await syncAllWarehouses();
     if (result.success) {
-      setSyncResult({ type: 'success', message: `Synced ${result.count} tires across ${result.warehouses} warehouse(s)` });
+      setSyncResult({ type: 'success', message: `Synced ${result.count} tires from the Canada Tire catalog` });
     } else {
       const extra = result.failures?.length
         ? ` (failed: ${result.failures.join(', ')})`
@@ -143,6 +152,30 @@ export default function ImportPanel({ tires, importFromCSV, clearAll, loadSample
       setSyncResult({ type: 'error', message: (result.error || 'Sync failed') + extra });
     }
     setTimeout(() => setSyncResult(null), 6000);
+  };
+
+  // Download a full JSON backup of the inventory
+  const handleExport = () => {
+    const data = exportData();
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `quickrev-backup-${new Date().toISOString().slice(0, 10)}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const handleJsonImport = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      setPendingImport(reader.result);
+      setConfirmAction({ type: 'importBackup' });
+    };
+    reader.readAsText(file);
+    e.target.value = '';
   };
 
   const formatSyncTime = (iso) => {
@@ -239,7 +272,8 @@ export default function ImportPanel({ tires, importFromCSV, clearAll, loadSample
         )}
 
         <p className="text-xs text-muted mt-3">
-          Run <code>npm run server</code> in a separate terminal to start the API proxy.
+          The API proxy runs inside this app's server — no separate setup needed.
+          A sync pulls the full Canada Tire catalog (Canada Tire's API returns everything in one response).
         </p>
       </div>
 
@@ -278,6 +312,15 @@ export default function ImportPanel({ tires, importFromCSV, clearAll, loadSample
             <Database className="w-4 h-4" />
             Load Sample Data
           </button>
+          <button className="btn btn-secondary" onClick={handleExport}>
+            <Download className="w-4 h-4" />
+            Export Backup
+          </button>
+          <button className="btn btn-secondary" onClick={() => jsonInputRef.current?.click()}>
+            <Upload className="w-4 h-4" />
+            Import Backup
+          </button>
+          <input ref={jsonInputRef} type="file" accept=".json" className="hidden" onChange={handleJsonImport} />
           <button className="btn btn-danger" onClick={() => setConfirmAction({ type: 'clearAll' })}>
             <Trash2 className="w-4 h-4" />
             Clear All Data
@@ -287,7 +330,9 @@ export default function ImportPanel({ tires, importFromCSV, clearAll, loadSample
               <span className="text-danger">
                 {confirmAction.type === 'deleteSelected'
                   ? `Delete ${selectedRows.size} selected tire(s)?`
-                  : 'Delete ALL tire data?'}
+                  : confirmAction.type === 'importBackup'
+                    ? 'Replace current data with this backup?'
+                    : 'Delete ALL tire data?'}
               </span>
               <button className="btn btn-sm btn-danger" onClick={confirmDelete}>Yes, delete</button>
               <button className="btn btn-sm btn-outline" onClick={() => setConfirmAction(null)}>Cancel</button>

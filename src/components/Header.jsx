@@ -49,12 +49,12 @@ export default function Header({ activeTab, setActiveTab, syncAllWarehouses, syn
             <span className="hide-sm">{syncing ? 'Syncing…' : 'Sync'}</span>
             <span className="show-sm">{syncing ? '…' : 'Sync'}</span>
           </button>
-          {syncing && syncProgress?.running && (
+          {syncing && syncProgress?.running && syncProgress.total > 1 && (
             <span className="text-xs text-muted sync-progress" title={`Syncing ${syncProgress.location}`}>
               {syncProgress.current}/{syncProgress.total}
             </span>
           )}
-          {syncProgress && !syncProgress.running && (
+          {syncProgress && !syncProgress.running && syncProgress.total > 1 && (
             <span className="text-xs text-muted sync-progress" title={syncProgress.failed ? `${syncProgress.failed} warehouse(s) failed` : ''}>
               {syncProgress.done}/{syncProgress.total}
               {syncProgress.failed > 0 ? ' ⚠' : ' ✓'}

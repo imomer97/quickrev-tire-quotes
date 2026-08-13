@@ -70,8 +70,9 @@ git push -u origin main
 3. Click the **Sync** button at the top of the page. It syncs all Canada Tire
    warehouses and shows live progress (e.g. `4/6`). If Canada Tire throttles a
    request, the server retries automatically with backoff — just let it run.
-4. Check the health endpoint works: `https://quickrev.onrender.com/api/health`
-   should return `{"status":"ok",...}`.
+4. Check the health endpoint works: `https://quickrev-twlw.onrender.com/api/health`
+   should return `{"status":"ok","missing":[],...}` (empty `missing` = all `CT_*`
+   secrets are set).
 
 ## Step 5 — Optional polish
 
@@ -107,6 +108,16 @@ docker run -p 3001:3001 --env-file .env quickrev
 - Inventory refreshes are **manual**: use the **Sync** button at the top of any
   page, or the Sync Now / Sync All Warehouses buttons on the Import tab. There
   is no background auto-sync.
-- All data (tires, prices, sale dates) is stored in the browser's localStorage,
-  so it lives on the device you use — syncing updates the Canada Tire stock on
-  that device.
+- **Data lives in each browser, not on the server.** Inventory, prices, and sale
+  dates are stored in the browser's localStorage, so they are per-device and
+  per-origin. A fresh device starts empty until you sync or restore a backup.
+- **Moving data between devices:** Import tab → **Export Backup** (downloads a
+  .json file) → on the other device → **Import Backup**. Your manual Star Tires /
+  Convenient imports and any price/sale edits are carried over too.
+- **Sync behavior:** Canada Tire's API ignores size/warehouse filters and returns
+  its full catalog (~2,200 tires, with per-warehouse quantities) in one response.
+  A sync therefore imports the complete catalog in a single call — the filter
+  fields on the Import tab are kept for future API support but don't limit the
+  download. First sync on a device takes a moment; later syncs are quick.
+- **Throttling:** the server retries automatically (10s → 30s → 60s backoff) when
+  Canada Tire rate-limits, so a sync can take a couple of minutes — just let it run.
