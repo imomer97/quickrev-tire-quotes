@@ -1,0 +1,47 @@
+# Render Blueprint — QuickRev Tire Quotes
+# Docs: https://render.com/docs/blueprint-spec
+#
+# To deploy: push this repo to GitHub, then in Render pick
+#   New + -> Blueprint  (or Web Service)
+# and connect the repository. Render builds the Dockerfile and starts one
+# web service that serves the app AND the Canada Tire API on one port.
+#
+# IMPORTANT: the CT_* secrets below are declared with `sync: false`, so they
+# are NOT stored in this file. After the service is created, open
+#   Dashboard -> your service -> Environment
+# and paste the real values (the same ones as your local .env). Then click
+# "Manual Deploy -> Deploy latest commit" once.
+
+services:
+  - type: web
+    name: quickrev
+    runtime: docker
+    repo: https://github.com/YOUR_GITHUB_USERNAME/quickrev-tire-quotes
+    plan: free
+    region: oregon
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /api/health
+    envVars:
+      # Platform-standard port — Render injects PORT automatically, so this is
+      # just a fallback that keeps the local docker run experience identical.
+      - key: PORT
+        value: 3001
+      # NetSuite / Canada Tire API credentials (values come from your .env).
+      # `sync: false` keeps them out of this file; fill them in the dashboard.
+      - key: CT_CONSUMER_KEY
+        sync: false
+      - key: CT_CONSUMER_SECRET
+        sync: false
+      - key: CT_TOKEN_ID
+        sync: false
+      - key: CT_TOKEN_SECRET
+        sync: false
+      - key: CT_CUSTOMER_ID
+        sync: false
+      - key: CT_CUSTOMER_TOKEN
+        sync: false
+      # Optional overrides (defaults are production / 8031691)
+      - key: CT_ENVIRONMENT
+        value: production
+      - key: CT_ACCOUNT_ID
+        value: 8031691
