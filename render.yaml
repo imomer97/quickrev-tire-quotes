@@ -16,7 +16,7 @@ services:
   - type: web
     name: quickrev
     runtime: docker
-    repo: https://github.com/YOUR_GITHUB_USERNAME/quickrev-tire-quotes
+    repo: https://github.com/imomer97/quickrev-tire-quotes
     plan: free
     region: oregon
     dockerfilePath: ./Dockerfile

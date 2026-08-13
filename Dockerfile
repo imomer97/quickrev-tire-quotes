@@ -2,9 +2,10 @@ FROM node:20-alpine
 
 WORKDIR /app
 
-# Install dependencies first for better layer caching
+# Install all dependencies first for better layer caching (vite is a dev
+# dependency and is required for the build step below)
 COPY package*.json ./
-RUN npm ci --omit=dev
+RUN npm ci
 
 # Build the frontend and copy the rest of the source
 COPY . .
