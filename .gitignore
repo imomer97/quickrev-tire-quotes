@@ -2,3 +2,7 @@ node_modules
 dist
 .env
 *.log
+
+# Stray artifacts (kept local only)
+direct
+QuickRev-Tire-Options-*.pdf
