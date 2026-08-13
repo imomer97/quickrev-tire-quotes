@@ -74,7 +74,7 @@ export default function ImportPanel({ tires, importFromCSV, clearAll, loadSample
       const result = importData(pendingImport);
       setSelectedRows(new Set());
       setImportResult(result.success
-        ? { type: 'success', message: `Restored ${result.count} tires from backup` }
+        ? { type: 'success', message: `Added ${result.added} tire(s) from backup${result.skipped ? ` — ${result.skipped} already present, skipped` : ''}` }
         : { type: 'error', message: result.error });
       setPendingImport(null);
     }
@@ -331,7 +331,7 @@ export default function ImportPanel({ tires, importFromCSV, clearAll, loadSample
                 {confirmAction.type === 'deleteSelected'
                   ? `Delete ${selectedRows.size} selected tire(s)?`
                   : confirmAction.type === 'importBackup'
-                    ? 'Replace current data with this backup?'
+                    ? 'Merge this backup into your data? Existing tires stay; synced Canada Tire tires already present are skipped.'
                     : 'Delete ALL tire data?'}
               </span>
               <button className="btn btn-sm btn-danger" onClick={confirmDelete}>Yes, delete</button>

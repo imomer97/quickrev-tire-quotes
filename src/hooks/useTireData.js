@@ -491,24 +491,38 @@ export function useTireData() {
     lastSyncAt,
   }), [tires, warehouseLocations, lastSyncAt]);
 
-  // Restore a backup created by exportData (replaces current inventory).
+  // Merge a backup created by exportData into the current inventory.
+  // Existing tires are kept: synced Canada Tire tires are matched by part
+  // number (so a fresh sync is never lost or duplicated), and manual tires
+  // (Star Tires / Convenient / CSV) are matched by distributor+brand+model+size.
   const importData = useCallback((json) => {
     try {
       const data = typeof json === 'string' ? JSON.parse(json) : json;
       if (!data || !Array.isArray(data.tires)) {
         return { success: false, error: 'Invalid backup file — expected a QuickRev export.' };
       }
-      const imported = data.tires.filter(t => t && t.brand && t.size);
-      setTires(imported);
+      const backup = data.tires.filter(t => t && t.brand && t.size);
+      const existing = new Set(tires.map(t =>
+        t.partNumber
+          ? `api:${t.partNumber}`
+          : `manual:${t.distributorId || ''}:${String(t.brand || '').toLowerCase()}:${String(t.model || '').toLowerCase()}:${String(t.size || '').toLowerCase()}`
+      ));
+      const added = backup.filter(t => {
+        const key = t.partNumber
+          ? `api:${t.partNumber}`
+          : `manual:${t.distributorId || ''}:${String(t.brand || '').toLowerCase()}:${String(t.model || '').toLowerCase()}:${String(t.size || '').toLowerCase()}`;
+        return !existing.has(key);
+      });
+      if (added.length) setTires(prev => [...prev, ...added]);
       if (Array.isArray(data.warehouseLocations) && data.warehouseLocations.length) {
         setWarehouseLocations(prev => [...new Set([...prev, ...data.warehouseLocations])].sort());
       }
       if (data.lastSyncAt) setLastSyncAt(data.lastSyncAt);
-      return { success: true, count: imported.length };
+      return { success: true, added: added.length, skipped: backup.length - added.length };
     } catch (err) {
       return { success: false, error: err.message };
     }
-  }, []);
+  }, [tires]);
 
   const getDistributorName = useCallback((id) => {
     return DISTRIBUTORS.find(d => d.id === id)?.name || id;
