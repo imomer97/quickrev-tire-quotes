@@ -215,9 +215,13 @@ export default function SearchPanel({ tires, updateTire, deleteTire, addTire, bu
         // 3. Raw size string contains the search string
         // 4. Brand contains search string
         // 5. Model contains search string
-        const normSizeMatch = normalizedTireSize.includes(normalizedSearch)
-          || numericTireSize.includes(numericSearch);
-        const sizeMatch = normSizeMatch || tire.size.toLowerCase().includes(searchLower);
+        // Guard against empty strings: .includes('') is true for every tire,
+        // so a letters-only search (brand/model) must not match on size.
+        const normSizeMatch = normalizedSearch.length > 0
+          && normalizedTireSize.includes(normalizedSearch);
+        const numericMatch = numericSearch.length > 0
+          && numericTireSize.includes(numericSearch);
+        const sizeMatch = normSizeMatch || numericMatch || tire.size.toLowerCase().includes(searchLower);
         const brandMatch = tire.brand.toLowerCase().includes(searchLower);
         const modelMatch = tire.model.toLowerCase().includes(searchLower);
         
