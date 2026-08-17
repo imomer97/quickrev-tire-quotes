@@ -5,12 +5,15 @@ import dotenv from 'dotenv';
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
+import pg from 'pg';
 
 dotenv.config();
 
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
 const app = express();
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '2mb' }));
 
 // Prefer the platform-standard PORT (Render/Railway/Fly inject this);
 // PROXY_PORT remains for local setups that used it.
@@ -51,6 +54,112 @@ function getAccountConfig(environment) {
   const realm = isSandbox ? `${accountId}_SB1` : accountId;
   return { baseUrl, realm, accountId };
 }
+
+// === CLOUD SYNC — SHARED DATA ACROSS DEVICES ================================
+// What lives where:
+//   - Canada Tire's synced catalog stays in each browser (it is reproducible
+//     with the Sync button), so it is never uploaded.
+//   - Everything the user creates or edits — manual tires (Star Tires,
+//     Convenient, CSV imports, added tires), price/sale overrides on synced
+//     tires, deleted-tire tombstones, and the warehouse list — is stored here
+//     and shared with every device.
+//
+// Storage backend: Postgres when DATABASE_URL is set (required on Render's
+// free tier, whose filesystem is ephemeral and wiped on every restart or
+// redeploy). A local JSON file is used only as a development fallback.
+const store = (() => {
+  const dbUrl = process.env.DATABASE_URL;
+  if (dbUrl) {
+    const pool = new pg.Pool({
+      connectionString: dbUrl,
+      connectionTimeoutMillis: 10000,
+      ssl: /localhost|127\.0\.0\.1/.test(dbUrl) ? false : { rejectUnauthorized: false },
+    });
+    pool.query(`CREATE TABLE IF NOT EXISTS sync_state (
+      id integer PRIMARY KEY,
+      data jsonb NOT NULL,
+      updated_at timestamptz NOT NULL DEFAULT now()
+    )`).catch(err => console.error('sync_state table init failed:', err.message));
+    return {
+      kind: 'postgres',
+      async read() {
+        const r = await pool.query('SELECT data FROM sync_state WHERE id = 1');
+        return r.rows[0]?.data || null;
+      },
+      async write(data) {
+        await pool.query(
+          `INSERT INTO sync_state (id, data, updated_at) VALUES (1, $1, now())
+           ON CONFLICT (id) DO UPDATE SET data = $1, updated_at = now()`,
+          [JSON.stringify(data)]
+        );
+      },
+      async ping() { await pool.query('SELECT 1'); return true; },
+    };
+  }
+  const file = path.join(__dirname, 'sync-state.json');
+  return {
+    kind: 'file',
+    async read() {
+      try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return null; }
+    },
+    async write(data) { fs.writeFileSync(file, JSON.stringify(data, null, 2)); },
+    async ping() { return true; },
+  };
+})();
+
+// Light guard for the sync endpoints. Defaults make local dev zero-config;
+// set APP_SYNC_KEY in production to a random string to lock them down.
+const SYNC_KEY = process.env.APP_SYNC_KEY || 'quickrev-app';
+
+function requireSyncKey(req, res, next) {
+  if ((req.get('x-sync-key') || '') !== SYNC_KEY) {
+    return res.status(401).json({ success: false, error: 'Invalid sync key.' });
+  }
+  next();
+}
+
+const EMPTY_SYNC = { manualTires: [], overrides: {}, deletedKeys: [], warehouseLocations: [] };
+
+// Pull the shared data (the app calls this on load).
+app.get('/api/sync-data', requireSyncKey, async (req, res) => {
+  try {
+    const data = await store.read();
+    res.json({ success: true, data: data || EMPTY_SYNC, storage: store.kind });
+  } catch (err) {
+    console.error('sync-data read failed:', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Push the shared data (the app calls this after every local change,
+// debounced). The server reconciles deletions: a tombstone key is kept only
+// while the key is absent from the incoming manual tires, so a tire that is
+// re-added stops being filtered out on every device.
+app.put('/api/sync-data', requireSyncKey, async (req, res) => {
+  const body = req.body || {};
+  const manualTires = Array.isArray(body.manualTires) ? body.manualTires : [];
+  const overrides = body.overrides && typeof body.overrides === 'object' ? body.overrides : {};
+  const deletedKeys = Array.isArray(body.deletedKeys) ? body.deletedKeys : [];
+  const warehouseLocations = Array.isArray(body.warehouseLocations) ? body.warehouseLocations : [];
+  try {
+    const prev = (await store.read()) || EMPTY_SYNC;
+    const prevDeleted = new Set(Array.isArray(prev.deletedKeys) ? prev.deletedKeys : []);
+    const incomingKeys = new Set(manualTires.map(t => t && t.syncKey).filter(Boolean));
+    for (const k of deletedKeys) if (k && !incomingKeys.has(k)) prevDeleted.add(k);
+    for (const k of [...prevDeleted]) if (incomingKeys.has(k)) prevDeleted.delete(k);
+
+    await store.write({
+      manualTires,
+      overrides,
+      deletedKeys: [...prevDeleted].slice(-500),
+      warehouseLocations,
+    });
+    res.json({ success: true, storage: store.kind });
+  } catch (err) {
+    console.error('sync-data write failed:', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
 
 /**
  * Generate OAuth 1.0 signature for NetSuite TBA
@@ -118,7 +227,7 @@ function generateOAuthAuth(method, baseUrl, script, deploy, creds) {
 }
 
 // === HEALTH CHECK ===
-app.get('/api/health', (req, res) => {
+app.get('/api/health', async (req, res) => {
   const creds = getCredentials();
   const missing = [];
   if (!creds.consumerKey) missing.push('CT_CONSUMER_KEY');
@@ -128,11 +237,22 @@ app.get('/api/health', (req, res) => {
   if (!creds.customerId) missing.push('CT_CUSTOMER_ID');
   if (!creds.customerToken) missing.push('CT_CUSTOMER_TOKEN');
 
+  let storageOk = null;
+  if (store.kind === 'postgres') {
+    try {
+      storageOk = await store.ping() === true;
+    } catch {
+      storageOk = false;
+    }
+  }
+
   res.json({
     status: missing.length === 0 ? 'ok' : 'missing_credentials',
     missing,
     environment: creds.environment,
     accountId: getAccountConfig(creds.environment).accountId,
+    storage: store.kind,
+    storageOk,
   });
 });
 
@@ -341,7 +461,6 @@ app.post('/api/canada-tire/shipto', async (req, res) => {
 // === STATIC PRODUCTION BUILD ===
 // Serve the built app (npm run build) from the same port as the API proxy, so
 // the whole application runs from one process/server in production.
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const distDir = path.join(__dirname, 'dist');
 if (fs.existsSync(distDir)) {
   app.use(express.static(distDir));

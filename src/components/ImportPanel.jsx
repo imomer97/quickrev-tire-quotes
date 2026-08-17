@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from 'react';
 import { Upload, Trash2, Database, AlertCircle, CheckCircle, RefreshCw, Search, Download } from 'lucide-react';
 import Papa from 'papaparse';
 
-export default function ImportPanel({ tires, importFromCSV, clearAll, loadSampleData, deleteTires, syncCanadaTire, syncAllWarehouses, syncAllRunning, checkApiHealth, apiStatus, isLoading, warehouseLocations, lastSyncAt, fetchWarehouseLocations, addWarehouseLocations, exportData, importData }) {
+export default function ImportPanel({ tires, importFromCSV, clearAll, loadSampleData, deleteTires, syncCanadaTire, syncAllWarehouses, syncAllRunning, checkApiHealth, apiStatus, isLoading, warehouseLocations, lastSyncAt, fetchWarehouseLocations, addWarehouseLocations, exportData, importData, cloudStatus }) {
   const [dragActive, setDragActive] = useState(false);
   const [importResult, setImportResult] = useState(null);
   const [selectedRows, setSelectedRows] = useState(new Set());
@@ -325,6 +325,25 @@ export default function ImportPanel({ tires, importFromCSV, clearAll, loadSample
             <Trash2 className="w-4 h-4" />
             Clear All Data
           </button>
+          <p className="text-xs mt-3" style={{ color: 'var(--text-muted, #6b7280)' }}>
+            <span
+              className="inline-block w-2 h-2 rounded-full mr-1.5 align-middle"
+              style={{
+                background: cloudStatus === 'ok' ? 'var(--success, #22c55e)'
+                  : cloudStatus === 'error' ? 'var(--danger, #ef4444)'
+                  : cloudStatus === 'syncing' ? 'var(--accent, #f59e0b)'
+                  : '#9ca3af',
+              }}
+            />
+            Cloud sync:{' '}
+            {cloudStatus === 'ok'
+              ? 'up to date — changes appear on your other devices'
+              : cloudStatus === 'error'
+                ? 'offline — changes stay on this device until it reconnects'
+                : cloudStatus === 'syncing'
+                  ? 'syncing…'
+                  : 'connecting…'}
+          </p>
           {confirmAction && (
             <div className="flex items-center gap-2 text-sm">
               <span className="text-danger">

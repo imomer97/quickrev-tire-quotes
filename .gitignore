@@ -6,3 +6,6 @@ dist
 # Stray artifacts (kept local only)
 direct
 QuickRev-Tire-Options-*.pdf
+
+# Local cloud-sync fallback (dev only)
+sync-state.json

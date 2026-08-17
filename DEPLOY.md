@@ -12,6 +12,13 @@ port — no separate static hosting needed. This guide deploys it to **Render**
 3. Your Canada Tire credentials — the same `CT_*` values as your local `.env`
    (`CT_CONSUMER_KEY`, `CT_CONSUMER_SECRET`, `CT_TOKEN_ID`, `CT_TOKEN_SECRET`,
    `CT_CUSTOMER_ID`, `CT_CUSTOMER_TOKEN`).
+4. A **free Postgres database** (5 minutes) so your manual tires and price edits
+   sync across devices. Render's free filesystem is wiped on every restart, so
+   this is required for the app to remember anything between visits. Easiest:
+   create a free database at https://neon.tech (or https://supabase.com), copy
+   its connection string — it looks like
+   `postgresql://user:password@host/dbname`. You only need the host database;
+   the app creates its table automatically on first use.
 
 ---
 
@@ -56,9 +63,12 @@ git push -u origin main
    | `CT_TOKEN_SECRET`    | from your `.env`                       |
    | `CT_CUSTOMER_ID`     | from your `.env` (e.g. `20446`)        |
    | `CT_CUSTOMER_TOKEN`  | from your `.env`                       |
+   | `DATABASE_URL`       | the Postgres connection string from Neon/Supabase |
+   | `APP_SYNC_KEY`       | any long random string, e.g. `openssl rand -hex 32` |
 
    (`CT_ENVIRONMENT`, `CT_ACCOUNT_ID`, and `PORT` are already set by the
-   blueprint — leave them as-is.)
+   blueprint — leave them as-is.) `APP_SYNC_KEY` locks the cloud-sync API so
+   only your app can read/write the shared data; it is not a user password.
 
 3. Click **Save Changes**, then **Manual Deploy → Deploy latest commit**.
 
@@ -108,12 +118,17 @@ docker run -p 3001:3001 --env-file .env quickrev
 - Inventory refreshes are **manual**: use the **Sync** button at the top of any
   page, or the Sync Now / Sync All Warehouses buttons on the Import tab. There
   is no background auto-sync.
-- **Data lives in each browser, not on the server.** Inventory, prices, and sale
-  dates are stored in the browser's localStorage, so they are per-device and
-  per-origin. A fresh device starts empty until you sync or restore a backup.
-- **Moving data between devices:** Import tab → **Export Backup** (downloads a
-  .json file) → on the other device → **Import Backup**. Your manual Star Tires /
-  Convenient imports and any price/sale edits are carried over too.
+- **Cloud sync across devices.** Manual tires (Star Tires, Convenient, CSV
+  imports), price/sale edits, and the warehouse list are uploaded to the server
+  (Postgres) and pulled down automatically — add a tire on your PC and it appears
+  on your phone (a few seconds later, on the next push/pull). No backups needed
+  for everyday use. The Canada Tire catalog itself stays in each browser: it is
+  reproducible any time with the **Sync** button, so it is not uploaded.
+- **First visit on a new device:** open the app and hit **Sync** — the catalog
+  arrives, and any manual tires/edits on the server merge in automatically.
+- **Offline safety net:** Import tab → **Data Management** → **Export Backup**
+  still downloads a .json snapshot of everything (catalog + manual tires) if you
+  ever want a manual copy; **Import Backup** merges it in.
 - **Sync behavior:** Canada Tire's API ignores size/warehouse filters and returns
   its full catalog (~2,200 tires, with per-warehouse quantities) in one response.
   A sync therefore imports the complete catalog in a single call — the filter

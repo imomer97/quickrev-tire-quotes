@@ -45,3 +45,14 @@ services:
         value: production
       - key: CT_ACCOUNT_ID
         value: 8031691
+      # Cloud sync — shares manual tires, price/sale edits and the warehouse
+      # list across all devices (PC + phone). Required for persistence:
+      #   DATABASE_URL — Postgres connection string from a free Neon/Supabase
+      #     instance (Render's free filesystem is ephemeral and wiped on every
+      #     restart/redeploy).
+      #   APP_SYNC_KEY — any long random string; defaults to 'quickrev-app'
+      #     when unset.
+      - key: DATABASE_URL
+        sync: false
+      - key: APP_SYNC_KEY
+        sync: false

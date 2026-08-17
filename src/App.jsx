@@ -29,6 +29,7 @@ export default function App() {
     lastSyncAt,
     addWarehouseLocations,
     fetchWarehouseLocations,
+    cloudSyncStatus,
   } = useTireData();
 
   return (
@@ -72,6 +73,7 @@ export default function App() {
             fetchWarehouseLocations={fetchWarehouseLocations}
             exportData={exportData}
             importData={importData}
+            cloudStatus={cloudSyncStatus}
           />
         )}
       </main>
