@@ -10,7 +10,6 @@ import {
   TIERS,
   VEHICLE_LABELS,
   calculatePurchaseCost,
-  calculateRetailPrice,
   calculateInstallationPerTire,
   parseTireSize,
   formatCurrency,
@@ -18,6 +17,10 @@ import {
   MARKUP_PER_TIRE,
   HST_RATE,
   getTierForBrand,
+  getRegularPrice,
+  getSaleInfo,
+  getEffectiveRetail,
+  resolvePostalCode,
 } from '../data/distributors.js';
 import { generateOptionsPDF } from '../utils/pdfGenerator.js';
 
@@ -80,6 +83,15 @@ export default function SearchPanel({ tires, updateTire, deleteTire, addTire, bu
   const [pdfTireSize, setPdfTireSize] = useState('');
   // Number of the purchased tires that will actually be installed (e.g. buy 4, install 2)
   const [installQty, setInstallQty] = useState(4);
+
+  // === TRAVEL SURCHARGE (per postal code) ===
+  const [postalCode, setPostalCode] = useState('');
+  // Multi-area FSAs (e.g. B2W) need a sub-area pick; index into the options
+  const [postalSubOption, setPostalSubOption] = useState(0);
+  const postalInfo = useMemo(
+    () => resolvePostalCode(postalCode, postalSubOption),
+    [postalCode, postalSubOption]
+  );
 
   // === EDIT MODE ===
   const [editingId, setEditingId] = useState(null);
@@ -171,32 +183,8 @@ export default function SearchPanel({ tires, updateTire, deleteTire, addTire, bu
     return size.toLowerCase().replace(/[^0-9]/g, '');
   };
 
-  // === PRICE / SALE LOGIC ===
-  // Regular price: an explicit per-tire price override (set via edit / bulk edit),
-  // otherwise the standard wholesale + env fee + markup retail price.
-  const getRegularPrice = useCallback((tire) => {
-    if (typeof tire.price === 'number' && tire.price > 0) return tire.price;
-    return calculateRetailPrice(tire.wholesale);
-  }, []);
-
-  // Sale status: salePrice applies only between saleStart and saleEnd (inclusive).
-  // When it expires, the regular price takes over automatically.
-  const getSaleInfo = useCallback((tire) => {
-    const salePrice = typeof tire.salePrice === 'number' && tire.salePrice > 0 ? tire.salePrice : null;
-    if (!salePrice) return { saleActive: false, salePrice: null, saleStart: null, saleEnd: null };
-    const now = new Date();
-    const start = tire.saleStart ? new Date(tire.saleStart) : null;
-    const end = tire.saleEnd ? new Date(tire.saleEnd) : null;
-    const started = !start || start <= now;
-    const notEnded = !end || now <= end;
-    return { saleActive: started && notEnded, salePrice, saleStart: start, saleEnd: end };
-  }, []);
-
-  // The price a customer actually pays today (sale while active, else regular)
-  const getEffectiveRetail = useCallback((tire) => {
-    const sale = getSaleInfo(tire);
-    return sale.saleActive ? sale.salePrice : getRegularPrice(tire);
-  }, [getSaleInfo, getRegularPrice]);
+  // Price / sale helpers (getRegularPrice, getSaleInfo, getEffectiveRetail) are
+  // shared from ../data/distributors.js so the PDF generator stays in sync.
 
   // === FILTER & SORT LOGIC ===
   const filteredTires = useMemo(() => {
@@ -437,6 +425,8 @@ export default function SearchPanel({ tires, updateTire, deleteTire, addTire, bu
       customerName,
       tireSize: pdfTireSize,
       installQty,
+      postalCode,
+      travelSurcharge: showInstall ? postalInfo.surcharge : 0,
     });
   };
 
@@ -446,7 +436,8 @@ export default function SearchPanel({ tires, updateTire, deleteTire, addTire, bu
     const installPerTire = showInstall ? (calc.installPerTire || 0) : 0;
     const tiresTotal = calc.tireTotal * quantity;
     const installTotal = installPerTire > 0 ? installPerTire * installQty * (1 + HST_RATE) : 0;
-    const grandTotal = tiresTotal + installTotal;
+    const travelSurcharge = showInstall ? postalInfo.surcharge : 0;
+    const grandTotal = tiresTotal + installTotal + travelSurcharge;
 
     const stockText = singleActiveLocation
       ? `Stock @ ${singleActiveLocation}: ${getTireStock(tire)} available`
@@ -455,7 +446,7 @@ export default function SearchPanel({ tires, updateTire, deleteTire, addTire, bu
 \n${tire.brand} ${tire.model} (${tire.season})
 ${quantity} tires × ${formatCurrency(calc.tireTotal)} = ${formatCurrency(tiresTotal)}
 ${installPerTire > 0 ? `${installQty} install(s) × ${formatCurrency(installPerTire)} (pre-tax) = ${formatCurrency(installTotal)}
-` : ''}Total: ${formatCurrency(grandTotal)}
+` : ''}${travelSurcharge > 0 ? `Travel surcharge (per job): ${formatCurrency(travelSurcharge)}\n` : ''}Total: ${formatCurrency(grandTotal)}
 ${stockText}
 \nquickrev.ca`;
 
@@ -625,6 +616,52 @@ ${stockText}
               />
               <span className="text-sm font-medium">QuickRev 10% Discount</span>
             </label>
+            <div>
+              <label className="text-xs font-semibold text-muted mb-1 block uppercase">Postal Code</label>
+              <input
+                type="text"
+                className="input w-24 font-mono uppercase"
+                maxLength={3}
+                placeholder="B3K"
+                value={postalCode}
+                onChange={(e) => {
+                  setPostalCode(e.target.value);
+                  setPostalSubOption(0);
+                }}
+              />
+            </div>
+            {postalInfo.options && postalInfo.options.length > 0 && (
+              <div>
+                <label className="text-xs font-semibold text-muted mb-1 block uppercase">Area</label>
+                <select
+                  className="input select"
+                  value={postalSubOption}
+                  onChange={(e) => setPostalSubOption(Number(e.target.value))}
+                >
+                  {postalInfo.options.map((opt, i) => (
+                    <option key={i} value={i}>
+                      {opt.label} — {opt.fee === 0 ? 'No surcharge' : `+$${opt.fee}`}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+            {postalCode.trim() && !postalInfo.unknown && (
+              <div className="pb-1">
+                <span className={`text-xs font-medium ${postalInfo.surcharge > 0 ? 'text-warning' : 'text-success'}`}>
+                  {postalInfo.surcharge > 0
+                    ? `Travel: +$${postalInfo.surcharge.toFixed(2)} (${postalInfo.label})`
+                    : `No travel surcharge (${postalInfo.label})`}
+                </span>
+              </div>
+            )}
+            {postalCode.trim() && postalInfo.unknown && (
+              <div className="pb-1">
+                <span className="text-xs font-medium text-warning">
+                  {postalInfo.label} — confirm travel charges
+                </span>
+              </div>
+            )}
             <div>
               <label className="text-xs font-semibold text-muted mb-1 block uppercase">Sort</label>
               <select
@@ -922,7 +959,9 @@ ${stockText}
             // Installation applies only to the number of tires to be installed (installQty)
             const installTotal = showInstall ? installPerTire * installQty : 0;
             const installTaxInclusive = installTotal * (1 + HST_RATE);
-            const grandTotal = tiresSubtotal + installTaxInclusive;
+            // Travel surcharge is per job and applies only when a service visit is included
+            const travelSurcharge = showInstall ? postalInfo.surcharge : 0;
+            const grandTotal = tiresSubtotal + installTaxInclusive + travelSurcharge;
 
             return (
               <div key={tire.id} className="card p-4">
@@ -1196,6 +1235,12 @@ ${stockText}
                       <span className="text-sm font-mono">{formatCurrency(installTaxInclusive)}</span>
                     </div>
                   )}
+                  {showInstall && travelSurcharge > 0 && (
+                    <div className="flex justify-between items-center mb-1">
+                      <span className="text-sm opacity-80">Travel surcharge (per job)</span>
+                      <span className="text-sm font-mono">{formatCurrency(travelSurcharge)}</span>
+                    </div>
+                  )}
                   <div className="border-t border-white/20 my-1" />
                   <div className="flex justify-between items-center">
                     <span className="text-sm font-bold">Total</span>
@@ -1203,7 +1248,7 @@ ${stockText}
                   </div>
                   <div className="flex justify-between items-center mt-1">
                     <span className="text-xs opacity-60">{singleActiveLocation ? `Stock @ ${singleActiveLocation}: ${getTireStock(tire)}` : `Stock: ${getTireStock(tire)}`}</span>
-                    <span className="text-xs opacity-60">Tires: {formatCurrency(tiresSubtotal)}{showInstall && installTotal > 0 ? ` + Install: ${formatCurrency(installTaxInclusive)}` : ''}</span>
+                    <span className="text-xs opacity-60">Tires: {formatCurrency(tiresSubtotal)}{showInstall && installTotal > 0 ? ` + Install: ${formatCurrency(installTaxInclusive)}` : ''}{showInstall && travelSurcharge > 0 ? ` + Travel: ${formatCurrency(travelSurcharge)}` : ''}</span>
                   </div>
                   {/* Expandable per-warehouse stock breakdown */}
                   {(tire.inventory || []).length > 0 && (

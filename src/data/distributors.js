@@ -212,10 +212,14 @@ export function calculateTotalWithTax(wholesale, width, aspect, rim, vehicleType
 }
 
 /**
- * Parse tire size string like "205/55R16" into components
+ * Parse tire size string into components.
+ * Accepts all common formats: "205/55R16", "20555R16", "2055516",
+ * "2,355,019" (comma-separated digits), "2355019".
  */
 export function parseTireSize(sizeStr) {
-  const match = sizeStr.match(/^(\d{3})\/(\d{2,3})R(\d{2})$/i);
+  if (!sizeStr) return null;
+  const compact = String(sizeStr).toUpperCase().replace(/[^0-9]/g, '');
+  const match = compact.match(/^(\d{3})(\d{2,3})(\d{2})$/);
   if (!match) return null;
   return {
     width: parseInt(match[1], 10),
@@ -248,4 +252,152 @@ export function formatCurrency(value) {
  */
 export function formatSize(sizeStr) {
   return sizeStr.toUpperCase();
+}
+
+// ========== SALE PRICING ==========
+
+/**
+ * Regular price: an explicit per-tire price override (set via edit / bulk edit),
+ * otherwise the standard wholesale + env fee + markup retail price.
+ */
+export function getRegularPrice(tire) {
+  if (typeof tire.price === 'number' && tire.price > 0) return tire.price;
+  return calculateRetailPrice(tire.wholesale);
+}
+
+/**
+ * Sale status: salePrice applies only between saleStart and saleEnd (inclusive).
+ * When it expires, the regular price takes over automatically.
+ */
+export function getSaleInfo(tire) {
+  const salePrice = typeof tire.salePrice === 'number' && tire.salePrice > 0 ? tire.salePrice : null;
+  if (!salePrice) return { saleActive: false, salePrice: null, saleStart: null, saleEnd: null };
+  const now = new Date();
+  const start = tire.saleStart ? new Date(tire.saleStart) : null;
+  const end = tire.saleEnd ? new Date(tire.saleEnd) : null;
+  const started = !start || start <= now;
+  const notEnded = !end || now <= end;
+  return { saleActive: started && notEnded, salePrice, saleStart: start, saleEnd: end };
+}
+
+/** The price a customer actually pays today (sale while active, else regular) */
+export function getEffectiveRetail(tire) {
+  const sale = getSaleInfo(tire);
+  return sale.saleActive ? sale.salePrice : getRegularPrice(tire);
+}
+
+// ========== TRAVEL SURCHARGE (by postal code) ==========
+// Source: quickrev_postal_codes.md — QuickRev Postal Code Service Area Logic
+
+export const POSTAL_ZONE_LABELS = {
+  zone1: 'Halifax',
+  zone2: 'Dartmouth',
+  zone3: 'Bedford & Sackville',
+  suburban: 'Suburban',
+  rural: 'Rural',
+  unknown: 'Outside service area',
+};
+
+// FSA → zone for flat-rate zones (no surcharge)
+export const POSTAL_ZONE_MAP = {
+  // Zone 1 — Halifax
+  B3H: 'zone1', B3J: 'zone1', B3K: 'zone1', B3L: 'zone1', B3M: 'zone1',
+  B3N: 'zone1', B3P: 'zone1', B3R: 'zone1', B3S: 'zone1',
+  // Zone 2 — Dartmouth core
+  B2V: 'zone2', B2X: 'zone2', B2Y: 'zone2', B3A: 'zone2', B3B: 'zone2',
+  // Zone 3 — Bedford & Sackville
+  B4A: 'zone3', B4C: 'zone3',
+};
+
+// Suburban (fixed surcharge)
+export const POSTAL_SUBURBAN_INFO = {
+  B3G: { area: 'Eastern Passage', surcharge: 15 },
+};
+
+// Rural (fixed surcharge)
+export const POSTAL_RURAL_INFO = {
+  B3E: { area: 'Porters Lake / Eastern Shore corridor', surcharge: 68 },
+  B4G: { area: 'Beaverbank / Kinsac', surcharge: 45 },
+  B2R: { area: 'Waverley', surcharge: 42 },
+  B2S: { area: 'Preston / Lantz', surcharge: 57 },
+  B2T: { area: 'Enfield / Fall River', surcharge: 68 },
+};
+
+// Multi-area FSAs: user must pick a sub-area (each has its own pricing)
+export const POSTAL_SUB_OPTIONS = {
+  B2W: [
+    { label: 'Woodlawn / Portland Hills / Shearwater', type: 'suburban', fee: 20 },
+    { label: 'Westphal / Lake Loon / Cole Harbour', type: 'rural', fee: 33 },
+  ],
+  B2Z: [
+    { label: 'Cole Harbour / Westphal', type: 'rural', fee: 33 },
+    { label: 'Cherry Brook / North Preston / East Preston', type: 'rural', fee: 38 },
+    { label: 'Lawrencetown / East, West & Upper / Mineville', type: 'rural', fee: 50 },
+  ],
+  B3V: [
+    { label: 'Herring Cove / Harrietsfield / Williamswood / Fergusons Cove', type: 'zone1', fee: 27 },
+    { label: 'Halibut Bay / Bear Cove / East Pennant / West Pennant', type: 'rural', fee: 33 },
+    { label: 'Portuguese Cove / Duncans Cove', type: 'rural', fee: 39 },
+    { label: 'Sambro / Ketch Harbour / Sambro Creek / Sambro Head', type: 'rural', fee: 48 },
+  ],
+  B3T: [
+    { label: 'Beechville / Lakeside (BLT)', type: 'zone1', fee: 0 },
+    { label: 'Timberlea / Goodwood', type: 'zone1', fee: 27 },
+    { label: 'Brookside / Hatchet Lake', type: 'rural', fee: 34 },
+    { label: 'Whites Lake / Shad Bay', type: 'rural', fee: 45 },
+    { label: 'Prospect / Terence Bay / Prospect Bay', type: 'rural', fee: 50 },
+  ],
+  B3Z: [
+    { label: 'Hammonds Plains', type: 'rural', fee: 42 },
+    { label: 'Tantallon', type: 'rural', fee: 48 },
+    { label: 'Upper Tantallon', type: 'rural', fee: 55 },
+    { label: 'Head of St Margarets Bay / Peggys Cove', type: 'rural', fee: 68 },
+  ],
+  B4B: [
+    { label: 'Bedford (NW)', type: 'zone3', fee: 0 },
+    { label: 'Hammonds Plains', type: 'suburban', fee: 20 },
+    { label: 'Upper Hammonds Plains', type: 'rural', fee: 42 },
+  ],
+  B4E: [
+    { label: 'Lower Sackville', type: 'zone3', fee: 0 },
+    { label: 'Middle Sackville', type: 'suburban', fee: 20 },
+    { label: 'Upper Sackville', type: 'rural', fee: 35 },
+  ],
+};
+
+/**
+ * Resolve an FSA (first 3 chars of a postal code) to a zone + travel surcharge.
+ * @param {string} fsa - e.g. "B3K", "B2T", "B2W"
+ * @param {number} subIndex - index into POSTAL_SUB_OPTIONS for multi-area FSAs
+ * @returns {{zone: string, label: string, surcharge: number, options: Array|null, unknown: boolean}}
+ */
+export function resolvePostalCode(fsa, subIndex = 0) {
+  const code = String(fsa || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 3);
+  if (!code) {
+    return { zone: 'unknown', label: '', surcharge: 0, options: null, unknown: true };
+  }
+  const options = POSTAL_SUB_OPTIONS[code];
+  if (options) {
+    const opt = options[Math.min(Math.max(subIndex || 0, 0), options.length - 1)];
+    return {
+      zone: opt.type,
+      label: opt.label,
+      surcharge: opt.fee,
+      options,
+      unknown: false,
+    };
+  }
+  const rural = POSTAL_RURAL_INFO[code];
+  if (rural) {
+    return { zone: 'rural', label: rural.area, surcharge: rural.surcharge, options: null, unknown: false };
+  }
+  const suburban = POSTAL_SUBURBAN_INFO[code];
+  if (suburban) {
+    return { zone: 'suburban', label: suburban.area, surcharge: suburban.surcharge, options: null, unknown: false };
+  }
+  const zone = POSTAL_ZONE_MAP[code];
+  if (zone) {
+    return { zone, label: POSTAL_ZONE_LABELS[zone] || zone, surcharge: 0, options: null, unknown: false };
+  }
+  return { zone: 'unknown', label: POSTAL_ZONE_LABELS.unknown, surcharge: 0, options: null, unknown: true };
 }

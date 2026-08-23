@@ -1,18 +1,28 @@
 import { jsPDF } from 'jspdf';
 import 'jspdf-autotable';
 import {
-  calculateRetailPrice,
-  calculateHST,
-  calculateTireTotal,
   calculateInstallationPerTire,
   parseTireSize,
   formatCurrency,
   HST_RATE,
+  getRegularPrice,
+  getSaleInfo,
+  getEffectiveRetail,
 } from '../data/distributors.js';
+
+/** Compact date like "Aug 15" for the sale-period column */
+function shortDate(d) {
+  if (!d) return '';
+  return d.toLocaleDateString([], { month: 'short', day: 'numeric' });
+}
 
 /**
  * Generate a PDF showing available tire options and estimated costs
  * FIXED: Installation now included in HST calculation
+ * FIXED: Sale-aware prices — when a tire is on sale (between saleStart and
+ *        saleEnd) the PDF shows the sale price; otherwise the regular price.
+ *        The sale period is shown in its own column and in the notes.
+ * ADDED: Travel surcharge per postal code (per job, added to the quote).
  * This is NOT an invoice — it is an informational document for the customer
  */
 export function generateOptionsPDF({
@@ -24,6 +34,8 @@ export function generateOptionsPDF({
   customerName = '',
   tireSize = '',
   installQty = quantity,
+  postalCode = '',
+  travelSurcharge = 0,
 }) {
   const doc = new jsPDF({ unit: 'mm', format: 'letter' });
   const pageWidth = doc.internal.pageSize.getWidth();
@@ -78,6 +90,12 @@ export function generateOptionsPDF({
   doc.text('Vehicle:', margin, y);
   doc.setFont('helvetica', 'normal');
   doc.text(vehicleType.charAt(0).toUpperCase() + vehicleType.slice(1), margin + 30, y);
+  if (postalCode) {
+    doc.setFont('helvetica', 'bold');
+    doc.text('Postal:', 115, y);
+    doc.setFont('helvetica', 'normal');
+    doc.text(postalCode.toUpperCase(), 115 + 20, y);
+  }
   y += 10;
 
   // === DISCLAIMER ===
@@ -88,7 +106,9 @@ export function generateOptionsPDF({
   doc.text('This document shows estimated costs for available tire options. Prices are subject to change. Not an invoice.', margin + 3, y + 2);
   y += 14;
 
-  // === TABLE DATA (FIXED: Separated columns for Price, Install, HST, Total) ===
+  // === TABLE DATA ===
+  // Prices are sale-aware: effective price = sale price while a sale is active,
+  // otherwise the regular price. Regular price is the fallback after a sale ends.
   const tableHeaders = [
     'Brand',
     'Model',
@@ -96,18 +116,23 @@ export function generateOptionsPDF({
     'Season',
     'Stock',
     'Price/Tire',
+    'Sale Period',
     includeInstallation ? 'Install/Tire' : '',
     'HST (14%)',
     'Total',
   ];
 
+  const onSaleRows = []; // tires currently on sale (for the notes section)
+  const pendingSaleRows = []; // sale set but not yet active / already ended
+
   const tableData = tires.map(tire => {
     const parsed = parseTireSize(tire.size);
-    
-    // Tire-only price (pre-tax, per tire)
-    const tirePrice = calculateRetailPrice(tire.wholesale);
-    const tireTaxInclusive = calculateTireTotal(tire.wholesale);
-    
+
+    // Sale-aware pricing (matches the item cards)
+    const tirePrice = getEffectiveRetail(tire);
+    const regularPrice = getRegularPrice(tire);
+    const sale = getSaleInfo(tire);
+
     let installPerTire = 0;
     let totalHST;
     let grandTotal;
@@ -118,11 +143,33 @@ export function generateOptionsPDF({
       );
       // Installation applies only to the number of tires to be installed (installQty)
       const installTotal = installPerTire * installQty;
-      totalHST = (tirePrice * quantity + installTotal) * HST_RATE;
-      grandTotal = tirePrice * quantity + installTotal + totalHST;
+      const preTax = tirePrice * quantity + installTotal;
+      totalHST = preTax * HST_RATE;
+      grandTotal = preTax + totalHST;
     } else {
-      totalHST = calculateHST(tire.wholesale) * quantity;
-      grandTotal = tireTaxInclusive * quantity;
+      const preTax = tirePrice * quantity;
+      totalHST = preTax * HST_RATE;
+      grandTotal = preTax + totalHST;
+    }
+
+    // Sale period cell — only when the sale is currently active
+    let salePeriod = '';
+    if (sale.saleActive) {
+      if (sale.saleStart && sale.saleEnd) {
+        salePeriod = `${shortDate(sale.saleStart)} – ${shortDate(sale.saleEnd)}`;
+      } else if (sale.saleEnd) {
+        salePeriod = `until ${shortDate(sale.saleEnd)}`;
+      } else if (sale.saleStart) {
+        salePeriod = `from ${shortDate(sale.saleStart)}`;
+      }
+      onSaleRows.push({
+        label: `${tire.brand} ${tire.model} (${tire.size})`,
+        regularPrice,
+        salePrice: sale.salePrice,
+        end: sale.saleEnd,
+      });
+    } else if (sale.salePrice) {
+      pendingSaleRows.push({ label: `${tire.brand} ${tire.model} (${tire.size})`, sale });
     }
 
     return [
@@ -131,7 +178,8 @@ export function generateOptionsPDF({
       tire.size,
       tire.season,
       tire.stock.toString(),
-      formatCurrency(tirePrice),  // Tire price only (pre-tax)
+      formatCurrency(tirePrice),  // effective price (sale while active, else regular)
+      salePeriod,                 // e.g. "Aug 1 – 15" or "until Aug 15"
       includeInstallation ? formatCurrency(installPerTire) : '',  // Installation only (per tire)
       formatCurrency(totalHST),   // HST on tires (× quantity) + installation (× installQty)
       formatCurrency(grandTotal), // Grand total for the whole quote
@@ -158,23 +206,33 @@ export function generateOptionsPDF({
       fillColor: [248, 250, 252],
     },
     columnStyles: {
-      0: { cellWidth: 20 },  // Brand
-      1: { cellWidth: 28 },  // Model
-      2: { cellWidth: 24, halign: 'center' },  // Size (wider to prevent wrapping)
-      3: { cellWidth: 22, halign: 'center' },  // Season (wider to prevent wrapping)
-      4: { cellWidth: 12, halign: 'center' },  // Stock
-      5: { cellWidth: 18, halign: 'right' },  // Price/Tire
-      6: { cellWidth: 18, halign: 'right' },  // Install/Tire (if included)
-      7: { cellWidth: 16, halign: 'right' },  // HST (14%)
-      8: { cellWidth: 18, halign: 'right' },  // Total
+      0: { cellWidth: 18 },  // Brand
+      // 1: Model — auto-sizes to fill the remaining page width
+      2: { cellWidth: 21 },  // Size
+      3: { cellWidth: 18 },  // Season
+      4: { cellWidth: 11 },  // Stock
+      5: { cellWidth: 17 },  // Price/Tire (effective, sale-aware)
+      6: { cellWidth: 20 },  // Sale Period
+      7: { cellWidth: 16 },  // Install/Tire (if included)
+      8: { cellWidth: 14 },  // HST (14%)
+      9: { cellWidth: 16 },  // Total
     },
     margin: { left: margin, right: margin },
   });
 
   y = doc.lastAutoTable.finalY + 10;
 
-  // === PRICING BREAKDOWN NOTE (NEW) ===
-  if (y < 240) {
+  // === TRAVEL SURCHARGE LINE (per job, not per tire) ===
+  if (includeInstallation && travelSurcharge > 0 && y < 235) {
+    doc.setTextColor(30, 41, 59);
+    doc.setFontSize(9);
+    doc.setFont('helvetica', 'bold');
+    doc.text(`Travel surcharge (per job): ${formatCurrency(travelSurcharge)}`, margin, y);
+    y += 6;
+  }
+
+  // === PRICING BREAKDOWN NOTE ===
+  if (y < 235) {
     doc.setTextColor(30, 41, 59);
     doc.setFontSize(8);
     doc.setFont('helvetica', 'bold');
@@ -184,9 +242,9 @@ export function generateOptionsPDF({
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(7);
     const breakdownNote = includeInstallation
-      ? `Quote covers ${quantity} tire(s); installation applies to ${installQty} of them. Each price includes tire cost (pre-tax) + installation (pre-tax) + 14% HST on both. HST applies to installation.`
+      ? `Quote covers ${quantity} tire(s); installation applies to ${installQty} of them. Each price includes tire cost (pre-tax) + installation (pre-tax) + 14% HST on both. HST applies to installation.${travelSurcharge > 0 ? ` A travel surcharge of ${formatCurrency(travelSurcharge)} applies per job.` : ''}`
       : `Each price includes: tire cost + 14% HST. Installation not included.`;
-    
+
     const breakdownLines = doc.splitTextToSize(breakdownNote, pageWidth - margin * 2);
     breakdownLines.forEach(line => {
       doc.text(line, margin, y);
@@ -196,7 +254,7 @@ export function generateOptionsPDF({
   }
 
   // === PRICING NOTES ===
-  if (y < 250) {
+  if (y < 245) {
     doc.setTextColor(30, 41, 59);
     doc.setFontSize(9);
     doc.setFont('helvetica', 'bold');
@@ -206,7 +264,7 @@ export function generateOptionsPDF({
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(8);
     const notes = [];
-    
+
     // Only add installation notes if installation is included
     if (includeInstallation) {
       notes.push(`• Installation includes off-rims mounting, balancing, and valve stems`);
@@ -218,30 +276,52 @@ export function generateOptionsPDF({
     } else {
       notes.push(`• Installation not included — ask for installation rates`);
     }
-    
+
+    // Sale notes — active sales (with period + regular price) and pending sales
+    onSaleRows.forEach(row => {
+      notes.push(`• ${row.label}: on sale ${formatCurrency(row.salePrice)} (regular ${formatCurrency(row.regularPrice)})${row.end ? ` until ${row.end.toLocaleDateString()}` : ''} — regular price applies after the sale ends`);
+    });
+    pendingSaleRows.forEach(row => {
+      const s = row.sale;
+      notes.push(`• ${row.label}: sale of ${formatCurrency(s.salePrice)} ${s.saleEnd && s.saleEnd < new Date() ? `ended ${s.saleEnd.toLocaleDateString()}` : `starts ${s.saleStart ? s.saleStart.toLocaleDateString() : 'soon'}`} — regular price applies now`);
+    });
+
+    // Travel surcharge note
+    if (travelSurcharge > 0) {
+      notes.push(`• Travel surcharge of ${formatCurrency(travelSurcharge)} applies${postalCode ? ` for postal code ${postalCode.toUpperCase()}` : ''} — per job, not per tire`);
+    } else if (postalCode) {
+      notes.push(`• No travel surcharge for postal code ${postalCode.toUpperCase()}`);
+    }
+
     notes.push(`• Stock levels are estimates and subject to change`);
 
     notes.forEach(note => {
-      doc.text(note, margin, y);
-      y += 4;
+      const lines = doc.splitTextToSize(note, pageWidth - margin * 2);
+      lines.forEach(line => {
+        doc.text(line, margin, y);
+        y += 4;
+      });
     });
 
     y += 3;
   }
 
-  // === SERVICE AREA NOTE (NEW) ===
+  // === SERVICE AREA NOTE ===
   if (y < 265) {
     doc.setFillColor(226, 232, 240);
     doc.roundedRect(margin, y - 3, pageWidth - margin * 2, 11, 1.5, 1.5, 'F');
-    
+
     doc.setTextColor(30, 41, 59);
     doc.setFontSize(8);
     doc.setFont('helvetica', 'bold');
     doc.text('Service Area Note:', margin + 2, y + 1);
-    
+
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(7);
-    doc.text('Extra travel charges may apply for suburban/rural areas. For more information, visit: quickrev.ca/services-pricing', margin + 2, y + 5);
+    const serviceNote = travelSurcharge > 0
+      ? `Travel surcharge of ${formatCurrency(travelSurcharge)} applies for this quote${postalCode ? ` (postal code ${postalCode.toUpperCase()})` : ''}.`
+      : 'Extra travel charges may apply for suburban/rural areas. For more information, visit: quickrev.ca/services-pricing';
+    doc.text(serviceNote, margin + 2, y + 5);
   }
 
   // === FOOTER ===
