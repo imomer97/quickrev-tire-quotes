@@ -87,6 +87,11 @@ export default function SearchPanel({ tires, updateTire, deleteTire, addTire, bu
   // === MULTI-SELECT ===
   const [selectedIds, setSelectedIds] = useState(new Set());
   const [copiedId, setCopiedId] = useState(null);
+  // === QUOTE (persistent across searches) ===
+  // Items deliberately "added to the quote" survive search/filter changes.
+  // Each entry is a snapshot of the tire so the quote stays intact even if the
+  // catalog is edited or the item is deleted later.
+  const [quoteItems, setQuoteItems] = useState([]);
   // Expandable per-warehouse stock breakdown on a card
   const [expandedStockId, setExpandedStockId] = useState(null);
   // === RESULTS PAGINATION ===
@@ -422,11 +427,33 @@ export default function SearchPanel({ tires, updateTire, deleteTire, addTire, bu
     setShowAddModal(false);
   };
 
+  // === QUOTE HANDLERS ===
+  // Moves the currently selected search results into the persistent quote,
+  // then clears the transient selection so the user can search again.
+  const addSelectedToQuote = () => {
+    if (selectedIds.size === 0) return;
+    const items = filteredTires.filter(t => selectedIds.has(t.id));
+    setQuoteItems(prev => {
+      const seen = new Set(prev.map(i => i.id));
+      const toAdd = items.filter(t => !seen.has(t.id));
+      return [...prev, ...toAdd];
+    });
+    setSelectedIds(new Set());
+  };
+
+  const removeFromQuote = (id) => {
+    setQuoteItems(prev => prev.filter(i => i.id !== id));
+  };
+
+  const clearQuote = () => {
+    if (quoteItems.length === 0) return;
+    setQuoteItems([]);
+  };
+
   // === PDF GENERATION ===
   const handleGeneratePDF = () => {
-    const selectedTires = filteredTires.filter(t => selectedIds.has(t.id));
-    if (selectedTires.length === 0) {
-      alert('Select at least one tire to generate the PDF.');
+    if (quoteItems.length === 0) {
+      alert('Add at least one item to the quote first.');
       return;
     }
     if (!vehicleType) {
@@ -434,7 +461,7 @@ export default function SearchPanel({ tires, updateTire, deleteTire, addTire, bu
       return;
     }
     generateOptionsPDF({
-      tires: selectedTires,
+      tires: quoteItems,
       quantity,
       vehicleType,
       buyFromQuickRev,
@@ -700,12 +727,56 @@ ${stockText}
               value={customerName}
               onChange={(e) => setCustomerName(e.target.value)}
             />
-            <button className="btn btn-primary" onClick={handleGeneratePDF} disabled={selectedIds.size === 0}>
+            <button className="btn btn-primary" onClick={handleGeneratePDF} disabled={quoteItems.length === 0}>
               <Download className="w-4 h-4" />
-              PDF ({selectedIds.size})
+              PDF ({quoteItems.length})
             </button>
           </div>
         </div>
+      </div>
+
+      {/* === QUOTE PANEL (persistent across searches) === */}
+      <div className="card p-4">
+        <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center gap-2">
+            <FileText className="w-4 h-4 text-accent" />
+            <h2 className="font-semibold">
+              Quote {quoteItems.length > 0 && <span className="badge badge-blue">{quoteItems.length}</span>}
+            </h2>
+          </div>
+          {quoteItems.length > 0 && (
+            <button className="btn btn-sm btn-ghost text-danger" onClick={clearQuote} title="Remove all items">
+              <Trash2 className="w-4 h-4" />
+              Clear All
+            </button>
+          )}
+        </div>
+        {quoteItems.length === 0 ? (
+          <p className="text-sm text-muted ml-1">
+            Select tires above (with the checkbox) and click <span className="font-semibold">“Add selected to quote”</span>.
+            Items stay in the quote while you search for more, then click <span className="font-semibold">PDF</span> when done.
+          </p>
+        ) : (
+          <ul className="flex flex-col gap-2">
+            {quoteItems.map(item => {
+              const qCalc = getTireCalculations(item);
+              return (
+                <li key={item.id} className="flex items-center gap-3 border border-slate-200 rounded-lg px-3 py-2">
+                  <div className="flex-1 min-w-0">
+                    <span className="text-sm font-semibold mr-2">{item.brand} {item.model}</span>
+                    <span className="badge badge-gray font-mono">{item.size}</span>
+                    <span className="text-xs text-muted ml-2">
+                      {quantity} × {formatCurrency(qCalc.tireTotal)} = {formatCurrency(qCalc.tireTotal * quantity)}
+                    </span>
+                  </div>
+                  <button className="btn btn-sm btn-ghost p-1 text-danger" onClick={() => removeFromQuote(item.id)} title="Remove from quote">
+                    <X className="w-4 h-4" />
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        )}
       </div>
 
       {/* === ADD TIRE MODAL === */}
@@ -893,6 +964,15 @@ ${stockText}
         <div className="flex items-center justify-between mb-4 px-2">
           <h2 className="text-lg font-semibold">Options ({filteredTires.length})</h2>
           <div className="flex gap-2">
+            <button
+              className="btn btn-sm btn-success"
+              onClick={addSelectedToQuote}
+              disabled={selectedIds.size === 0}
+              title="Add the currently selected tires to the quote"
+            >
+              <Plus className="w-4 h-4" />
+              Add selected to quote ({selectedIds.size})
+            </button>
             {selectedIds.size > 0 && (
               <button className="btn btn-sm btn-outline" onClick={() => setShowBulkEdit(v => !v)}>
                 {showBulkEdit ? 'Hide Bulk Edit' : `Bulk Edit (${selectedIds.size})`}
@@ -1074,6 +1154,7 @@ ${stockText}
             const travelSurcharge = showInstall ? postalInfo.surcharge : 0;
             const grandTotal = tiresSubtotal + installTaxInclusive + travelSurcharge;
 
+            const inQuote = quoteItems.some(q => q.id === tire.id);
             return (
               <div key={tire.id} className="card p-4">
                 <div className="flex items-start justify-between mb-3">
@@ -1110,7 +1191,8 @@ ${stockText}
                       )}
                     </div>
                   </div>
-                  <div className="flex gap-1">
+                  <div className="flex gap-1 items-center">
+                    {inQuote && <span className="badge badge-green">In quote</span>}
                     {!isEditing ? (
                       <>
                         <button className="btn btn-sm btn-ghost p-1" onClick={() => startEdit(tire)} title="Edit">

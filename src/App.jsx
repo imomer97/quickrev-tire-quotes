@@ -30,6 +30,7 @@ export default function App() {
     addWarehouseLocations,
     fetchWarehouseLocations,
     cloudSyncStatus,
+    retryCloudSync,
     distributors,
     addDistributor,
     removeDistributor,
@@ -44,6 +45,8 @@ export default function App() {
         syncAllRunning={syncAllRunning}
         syncProgress={syncProgress}
         isLoading={isLoading}
+        cloudSyncStatus={cloudSyncStatus}
+        onRetryCloudSync={retryCloudSync}
       />
       <main className="app-main">
         {activeTab === 'search' && (

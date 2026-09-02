@@ -118,7 +118,7 @@ function requireSyncKey(req, res, next) {
   next();
 }
 
-const EMPTY_SYNC = { manualTires: [], overrides: {}, deletedKeys: [], warehouseLocations: [] };
+const EMPTY_SYNC = { manualTires: [], overrides: {}, deletedKeys: [], warehouseLocations: [], customDistributors: [] };
 
 // Pull the shared data (the app calls this on load).
 app.get('/api/sync-data', requireSyncKey, async (req, res) => {
@@ -141,18 +141,42 @@ app.put('/api/sync-data', requireSyncKey, async (req, res) => {
   const overrides = body.overrides && typeof body.overrides === 'object' ? body.overrides : {};
   const deletedKeys = Array.isArray(body.deletedKeys) ? body.deletedKeys : [];
   const warehouseLocations = Array.isArray(body.warehouseLocations) ? body.warehouseLocations : [];
+  const customDistributors = Array.isArray(body.customDistributors) ? body.customDistributors : [];
   try {
     const prev = (await store.read()) || EMPTY_SYNC;
+
+    // Merge manual tires by sync key (union, newest updatedAt wins) rather than
+    // wholesale-replacing the stored list. A cold-starting client can upload an
+    // empty catalog before its pulled data has landed; merging keeps everyone's
+    // shared manual tires intact when that happens, so previously-added items
+    // don't vanish from other devices / the online app.
+    const byKey = new Map();
+    for (const t of (Array.isArray(prev.manualTires) ? prev.manualTires : [])) {
+      if (t && t.syncKey) byKey.set(t.syncKey, t);
+    }
+    for (const t of manualTires) {
+      if (!t || !t.syncKey) continue;
+      const ex = byKey.get(t.syncKey);
+      if (!ex || (t.updatedAt || '') >= (ex.updatedAt || '')) byKey.set(t.syncKey, t);
+    }
+
+    // Tombstones mark tires deliberately deleted. A stored tombstone is kept
+    // only while its key is still missing (re-adding a tire stops it being
+    // filtered out on every device); an incoming tombstone removes the merged
+    // tire so a deliberate delete stays gone.
     const prevDeleted = new Set(Array.isArray(prev.deletedKeys) ? prev.deletedKeys : []);
     const incomingKeys = new Set(manualTires.map(t => t && t.syncKey).filter(Boolean));
     for (const k of deletedKeys) if (k && !incomingKeys.has(k)) prevDeleted.add(k);
     for (const k of [...prevDeleted]) if (incomingKeys.has(k)) prevDeleted.delete(k);
 
+    const mergedManual = [...byKey.values()].filter(t => !prevDeleted.has(t.syncKey));
+
     await store.write({
-      manualTires,
+      manualTires: mergedManual,
       overrides,
       deletedKeys: [...prevDeleted].slice(-500),
       warehouseLocations,
+      customDistributors,
     });
     res.json({ success: true, storage: store.kind });
   } catch (err) {

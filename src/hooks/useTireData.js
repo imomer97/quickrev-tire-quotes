@@ -443,6 +443,12 @@ export function useTireData() {
   }, []);
 
   const clearAll = useCallback(() => {
+    // Mark every manual tire as deleted so the cloud fork honors a clear-all
+    // on other devices too (the server keeps tombstones and drops these on
+    // merge). Canada Tire catalog tires are local-only and don't sync.
+    for (const t of tiresRef.current) {
+      if (t.source !== 'api') deletedKeysRef.current.add(manualSyncKey(t));
+    }
     setTires([]);
     localStorage.removeItem(STORAGE_KEY);
   }, []);
@@ -577,60 +583,64 @@ export function useTireData() {
       const res = await fetch('/api/sync-data', { headers: { 'X-Sync-Key': SYNC_KEY } });
       if (!res.ok) throw new Error('HTTP ' + res.status);
       const { data } = await res.json();
-      if (!data) return { success: true };
+      const seed = { tires: tiresRef.current, warehouseLocations: locationsRef.current, customDistributors: customDistRef.current };
+      if (!data) return { success: true, ...seed };
       const serverManual = Array.isArray(data.manualTires) ? data.manualTires : [];
       const serverOverrides = data.overrides && typeof data.overrides === 'object' ? data.overrides : {};
       const serverDeleted = new Set(Array.isArray(data.deletedKeys) ? data.deletedKeys : []);
 
-      setTires(prev => {
-        // Drop locally-deleted manual tires that the server also marks gone
-        // (prevents them from resurrecting on this device).
-        let next = prev.filter(t => t.source === 'api' || !serverDeleted.has(manualSyncKey(t)));
+      // Build the merged catalog from current state directly (not inside a
+      // setState updater) so the returned value exactly matches what we apply.
+      // The seed push hands this merged data to the server instead of this
+      // device's stale (possibly empty on a new browser) state — pushing stale
+      // data right after a cold pull would erase everyone's shared manual tires.
+      //
+      // Drop locally-deleted manual tires that the server also marks gone
+      // (prevents them from resurrecting on this device).
+      let next = tiresRef.current.filter(t => t.source === 'api' || !serverDeleted.has(manualSyncKey(t)));
 
-        // Merge the server's manual tires: server wins per tire (newest
-        // updatedAt); local-only tires are kept and seeded by the next push.
-        if (serverManual.length > 0) {
-          const serverMap = new Map(serverManual.map(t => [t.syncKey || manualSyncKey(t), t]));
-          const merged = new Map();
-          for (const t of next) {
-            if (t.source !== 'api') merged.set(manualSyncKey(t), t);
-          }
-          for (const [k, st] of serverMap) {
-            const lt = merged.get(k);
-            if (!lt || (st.updatedAt || '') >= (lt.updatedAt || '')) merged.set(k, st);
-          }
-          next = [...next.filter(t => t.source === 'api'), ...merged.values()];
-        }
-
-        // Price/sale overrides for synced Canada Tire tires. The server is
-        // authoritative when it has any (a sale cleared on one device clears
-        // it everywhere); with no server data yet, local overrides are kept
-        // and seeded by the first push.
-        if (Object.keys(serverOverrides).length > 0) {
-          next = next.map(t => {
-            if (t.source !== 'api' || !t.partNumber) return t;
-            const o = serverOverrides[t.partNumber];
-            if (o) {
-              return { ...t, price: o.price, salePrice: o.salePrice, saleStart: o.saleStart, saleEnd: o.saleEnd };
-            }
-            return { ...t, price: undefined, salePrice: undefined, saleStart: undefined, saleEnd: undefined };
-          });
-        }
-        return next;
-      });
-
-      if (Array.isArray(data.warehouseLocations) && data.warehouseLocations.length) {
-        setWarehouseLocations(prev => [...new Set([...prev, ...data.warehouseLocations])].sort());
+      // Merge the server's manual tires: newest updatedAt wins; local-only
+      // tires are kept and seeded by the first push.
+      const serverMap = new Map(serverManual.map(t => [t.syncKey || manualSyncKey(t), t]));
+      const merged = new Map();
+      for (const t of next) {
+        if (t.source !== 'api') merged.set(manualSyncKey(t), t);
       }
-      if (Array.isArray(data.customDistributors) && data.customDistributors.length) {
-        setCustomDistributors(prev => {
-          const map = new Map();
-          [...DISTRIBUTORS, ...prev, ...data.customDistributors].forEach(d => map.set(d.id, d));
-          return [...map.values()].filter(d => !DISTRIBUTORS.some(b => b.id === d.id));
+      for (const [k, st] of serverMap) {
+        const lt = merged.get(k);
+        if (!lt || (st.updatedAt || '') >= (lt.updatedAt || '')) merged.set(k, st);
+      }
+      next = [...next.filter(t => t.source === 'api'), ...merged.values()];
+
+      // Price/sale overrides for synced Canada Tire tires. The server is
+      // authoritative when it has any (a sale cleared on one device clears
+      // it everywhere); with no server data yet, local overrides are kept
+      // and seeded by the first push.
+      if (Object.keys(serverOverrides).length > 0) {
+        next = next.map(t => {
+          if (t.source !== 'api' || !t.partNumber) return t;
+          const o = serverOverrides[t.partNumber];
+          if (o) {
+            return { ...t, price: o.price, salePrice: o.salePrice, saleStart: o.saleStart, saleEnd: o.saleEnd };
+          }
+          return { ...t, price: undefined, salePrice: undefined, saleStart: undefined, saleEnd: undefined };
         });
       }
+
+      const mergedLocs = [...new Set([
+        ...locationsRef.current,
+        ...(Array.isArray(data.warehouseLocations) ? data.warehouseLocations : []),
+      ])].sort();
+      const custMap = new Map();
+      [...DISTRIBUTORS, ...customDistRef.current, ...(Array.isArray(data.customDistributors) ? data.customDistributors : [])]
+        .forEach(d => d && custMap.set(d.id, d));
+      const mergedCust = [...custMap.values()].filter(d => !DISTRIBUTORS.some(b => b.id === d.id));
+
+      setTires(next);
+      setWarehouseLocations(mergedLocs);
+      setCustomDistributors(mergedCust);
       setCloudSyncStatus('ok');
-      return { success: true };
+      return { success: true, tires: next, warehouseLocations: mergedLocs, customDistributors: mergedCust };
     } catch (err) {
       console.warn('Cloud sync pull failed (app keeps working offline):', err.message);
       setCloudSyncStatus('error');
@@ -638,8 +648,12 @@ export function useTireData() {
     }
   }, []);
 
-  const pushServerData = useCallback(async () => {
-    const current = tiresRef.current;
+  const pushServerData = useCallback(async (snapshot) => {
+    // "snapshot" is the freshly-pulled/merged data handed back from a load-time
+    // pull. During the very first push after a cold start it lets us upload the
+    // merged catalog instead of our still-stale local state, so we never
+    // overwrite the shared manual tires with an empty list.
+    const current = snapshot?.tires || tiresRef.current;
     const manualTires = current
       .filter(t => t.source !== 'api')
       .map(t => ({ ...t, syncKey: manualSyncKey(t), updatedAt: t.updatedAt || t.createdAt || null }));
@@ -665,8 +679,8 @@ export function useTireData() {
           manualTires,
           overrides,
           deletedKeys: [...deletedKeysRef.current],
-          warehouseLocations: locationsRef.current,
-          customDistributors: customDistRef.current,
+          warehouseLocations: snapshot?.warehouseLocations || locationsRef.current,
+          customDistributors: snapshot?.customDistributors || customDistRef.current,
         }),
       });
       if (!res.ok) throw new Error('HTTP ' + res.status);
@@ -683,23 +697,36 @@ export function useTireData() {
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      await pullServerData();
+      const pulled = await pullServerData();
       if (!cancelled) {
         hydratedRef.current = true;
-        await pushServerData();
+        // Seed with the freshly-pulled/merged data. Pushing our own local state
+        // (empty on a brand-new browser) in the same tick as the pull would
+        // upload an empty catalog before the pulled data has landed, wiping the
+        // shared manual tires on every other device.
+        const seed = pulled && pulled.success
+          ? {
+              tires: pulled.tires || tiresRef.current,
+              warehouseLocations: pulled.warehouseLocations,
+              customDistributors: pulled.customDistributors,
+            }
+          : undefined;
+        await pushServerData(seed);
       }
     })();
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Debounced background push after any local change.
+  // Debounced background push after any local change. Adding/removing a
+  // distributor must also trigger a push, or new distributors (and the tires
+  // that reference them) never reach other devices.
   useEffect(() => {
     if (!hydratedRef.current) return;
     clearTimeout(pushTimerRef.current);
     pushTimerRef.current = setTimeout(() => { pushServerData(); }, 800);
     return () => clearTimeout(pushTimerRef.current);
-  }, [tires, warehouseLocations, pushServerData]);
+  }, [tires, warehouseLocations, customDistributors, pushServerData]);
 
   const getAllDistributors = useCallback(() => [...DISTRIBUTORS, ...customDistributors], [customDistributors]);
 
@@ -747,6 +774,21 @@ export function useTireData() {
     exportData,
     importData,
     cloudSyncStatus,
+    // Retry the whole sync: re-pull the shared data, then push with the merged
+    // snapshot so we never upload our stale local state (which could wipe
+    // other devices' manual tires on a cold start).
+    retryCloudSync: async () => {
+      const pulled = await pullServerData();
+      await pushServerData(
+        pulled && pulled.success
+          ? {
+              tires: pulled.tires,
+              warehouseLocations: pulled.warehouseLocations,
+              customDistributors: pulled.customDistributors,
+            }
+          : undefined
+      );
+    },
     syncCanadaTire,
     syncAllWarehouses,
     syncAllRunning,

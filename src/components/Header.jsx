@@ -1,6 +1,6 @@
-import { Circle, Settings, RefreshCw } from 'lucide-react';
+import { Circle, Settings, RefreshCw, Cloud, CloudOff } from 'lucide-react';
 
-export default function Header({ activeTab, setActiveTab, syncAllWarehouses, syncAllRunning, syncProgress, isLoading }) {
+export default function Header({ activeTab, setActiveTab, syncAllWarehouses, syncAllRunning, syncProgress, isLoading, cloudSyncStatus, onRetryCloudSync }) {
   const tabs = [
     { id: 'search', label: 'Search & Quote', short: 'Search' },
     { id: 'import', label: 'Import Data', short: 'Import' },
@@ -39,6 +39,39 @@ export default function Header({ activeTab, setActiveTab, syncAllWarehouses, syn
         </div>
 
         <div className="flex items-center gap-2">
+          {/* Cloud sync for manual tires & edits (visible on every tab so a
+              failed push is obvious instead of silently dropping items). */}
+          {(() => {
+            const err = cloudSyncStatus === 'error';
+            const syncing = cloudSyncStatus === 'syncing';
+            const ok = cloudSyncStatus === 'ok';
+            let color = '#9ca3af'; // idle/connecting
+            let Icon = Cloud;
+            let label = 'Cloud…';
+            let title = 'Connecting to the shared QuickRev data…';
+            if (err)   { color = 'var(--danger)'; Icon = CloudOff; label = 'Cloud off'; title = 'Manual tires and edits are NOT reaching other devices. Retry to send them.'; }
+            else if (syncing) { color = 'var(--warning)'; Icon = RefreshCw; label = 'Syncing…'; title = 'Uploading manual tires & edits…'; }
+            else if (ok) { color = 'var(--success)'; Icon = Cloud; label = 'Cloud synced'; title = 'Manual tires & edits are shared with your other devices.'; }
+            return (
+              <div
+                className="flex items-center gap-1.5 rounded-full px-2 py-1 text-xs text-white whitespace-nowrap"
+                style={{ background: err ? 'rgba(239,68,68,0.18)' : 'rgba(255,255,255,0.08)' }}
+                title={title}
+              >
+                <Icon className={`w-3.5 h-3.5 ${syncing ? 'animate-spin' : ''}`} style={{ color }} />
+                <span>{label}</span>
+                {err && (
+                  <button
+                    className="inline underline underline-offset-2 hover:opacity-75"
+                    onClick={onRetryCloudSync}
+                    title="Retry uploading manual tires & edits"
+                  >
+                    Retry
+                  </button>
+                )}
+              </div>
+            );
+          })()}
           <button
             className="btn btn-sm sync-btn text-white"
             onClick={handleSync}
