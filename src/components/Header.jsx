@@ -1,4 +1,5 @@
-import { Circle, Settings, RefreshCw, Cloud, CloudOff } from 'lucide-react';
+import { Settings, RefreshCw, Cloud, CloudOff } from 'lucide-react';
+import logoUrl from '../assets/quickrev-logo.png';
 
 export default function Header({ activeTab, setActiveTab, syncAllWarehouses, syncAllRunning, syncProgress, isLoading, cloudSyncStatus, onRetryCloudSync }) {
   const tabs = [
@@ -16,13 +17,7 @@ export default function Header({ activeTab, setActiveTab, syncAllWarehouses, syn
     <header className="bg-primary text-white sticky top-0 z-50 shadow-lg">
       <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 px-3 md-px-6 py-2 md-py-3 max-w-7xl mx-auto">
         <div className="flex items-center gap-3">
-          <div className="w-8 h-8 md-w-10 md-h-10 bg-accent rounded-lg flex items-center justify-center">
-            <Circle className="w-5 h-5 md-w-6 md-h-6 text-white" />
-          </div>
-          <div>
-            <h1 className="text-lg md-text-xl font-bold leading-tight">QuickRev</h1>
-            <p className="text-xs text-muted hide-sm">Tire Options & Estimates</p>
-          </div>
+          <img src={logoUrl} alt="QuickRev" className="h-6 md:h-7 w-auto shrink-0" />
         </div>
 
         <div className="tab-nav bg-primary-light">

@@ -1,5 +1,6 @@
 import { jsPDF } from 'jspdf';
 import 'jspdf-autotable';
+import quickrevLogo from '../assets/quickrev-logo.png?inline';
 import {
   calculateInstallationPerTire,
   parseTireSize,
@@ -51,10 +52,11 @@ export function generateOptionsPDF({
   doc.setFillColor(15, 23, 42);
   doc.rect(0, 0, pageWidth, 35, 'F');
 
-  doc.setTextColor(255, 255, 255);
-  doc.setFontSize(22);
-  doc.setFont('helvetica', 'bold');
-  doc.text('QUICKREV', margin, 18);
+  // QuickRev logo (red wordmark on transparent), vertically centred on the band.
+  const { width: lw, height: lh } = doc.getImageProperties(quickrevLogo);
+  const logoH = 9;
+  const logoW = (lw / lh) * logoH;
+  doc.addImage(quickrevLogo, 'PNG', margin, (35 - logoH) / 2, logoW, logoH);
 
   doc.setFontSize(10);
   doc.setFont('helvetica', 'normal');
@@ -125,7 +127,7 @@ export function generateOptionsPDF({
   );
   const showInstallCol = includeInstallation && anyInstall;
 
-  const rows = tires.map(tire => {
+  const rowMeta = tires.map(tire => {
     const parsed = parseTireSize(tire.size);
 
     // Sale-aware pricing (matches the item cards). Free items price at $0.
@@ -186,8 +188,16 @@ export function generateOptionsPDF({
     if (showPeriod) row.push(salePeriod);               // e.g. "Aug 1 – 15" or "until Aug 15"
     if (showInstallCol) row.push(installPerTire > 0 ? formatCurrency(installPerTire) : '—');  // Installation only (per tire)
     row.push(formatCurrency(totalHST), formatCurrency(grandTotal));
-    return row;
+    return { cells: row, price: tirePrice, isFree: !!tire.isFree };
   });
+
+  // Order the table for customers: by effective price per tire, lowest first,
+  // with free items ($0.00 gifts/accessories) grouped at the very bottom.
+  rowMeta.sort((a, b) => {
+    if (a.isFree !== b.isFree) return a.isFree ? 1 : -1;
+    return (a.price || 0) - (b.price || 0);
+  });
+  const rows = rowMeta.map(r => r.cells);
 
   // === TABLE HEADERS ===
   const tableHeaders = ['Brand', 'Model', 'Size', 'Season', 'Stock', 'Price/Tire'];
@@ -204,17 +214,20 @@ export function generateOptionsPDF({
   col.hst = next++;
   col.total = next++;
 
+  // Fixed widths that are wide enough to keep every header (Stock, Price/Tire,
+  // Install/Tire, HST (14%), Sale Period) on a single line. Model auto-sizes to
+  // whatever width remains.
   const columnStyles = {
     [col.brand]: { cellWidth: 18 },
     [col.size]: { cellWidth: 22 },
     [col.season]: { cellWidth: 20 },
-    [col.stock]: { cellWidth: 10 },
-    [col.price]: { cellWidth: 18 },
+    [col.stock]: { cellWidth: 12 },
+    [col.price]: { cellWidth: 19 },
   };
-  if (showPeriod) columnStyles[col.period] = { cellWidth: 26 };
-  if (showInstallCol) columnStyles[col.install] = { cellWidth: 22 };
-  columnStyles[col.hst] = { cellWidth: 16 };
-  columnStyles[col.total] = { cellWidth: 18 };
+  if (showPeriod) columnStyles[col.period] = { cellWidth: 22 };
+  if (showInstallCol) columnStyles[col.install] = { cellWidth: 23 };
+  columnStyles[col.hst] = { cellWidth: 19 };
+  columnStyles[col.total] = { cellWidth: 19 };
 
   doc.autoTable({
     startY: y,
@@ -243,16 +256,10 @@ export function generateOptionsPDF({
 
   y = doc.lastAutoTable.finalY + 10;
 
-  // === TRAVEL SURCHARGE LINE (per job, not per tire) ===
-  if (includeInstallation && travelSurcharge > 0 && y < 235) {
-    doc.setTextColor(30, 41, 59);
-    doc.setFontSize(9);
-    doc.setFont('helvetica', 'bold');
-    doc.text(`Travel surcharge (per job): ${formatCurrency(travelSurcharge)}`, margin, y);
-    y += 6;
-  }
-
   // === PRICING BREAKDOWN NOTE ===
+  // NOTE: the travel surcharge is intentionally not called out as big bold
+  // text after the table — it is folded into the small breakdown paragraph
+  // below (and a short bullet in the notes) to stay factual and low-key.
   if (y < 235) {
     doc.setTextColor(30, 41, 59);
     doc.setFontSize(8);
@@ -330,24 +337,6 @@ export function generateOptionsPDF({
     });
 
     y += 3;
-  }
-
-  // === SERVICE AREA NOTE ===
-  if (y < 265) {
-    doc.setFillColor(226, 232, 240);
-    doc.roundedRect(margin, y - 3, pageWidth - margin * 2, 11, 1.5, 1.5, 'F');
-
-    doc.setTextColor(30, 41, 59);
-    doc.setFontSize(8);
-    doc.setFont('helvetica', 'bold');
-    doc.text('Service Area Note:', margin + 2, y + 1);
-
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(7);
-    const serviceNote = travelSurcharge > 0
-      ? `Travel surcharge of ${formatCurrency(travelSurcharge)} applies for this quote${postalCode ? ` (postal code ${postalCode.toUpperCase()})` : ''}.`
-      : 'Extra travel charges may apply for suburban/rural areas. For more information, visit: quickrev.ca/services-pricing';
-    doc.text(serviceNote, margin + 2, y + 5);
   }
 
   // === FOOTER ===
