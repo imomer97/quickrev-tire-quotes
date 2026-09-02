@@ -42,6 +42,9 @@ export function generateOptionsPDF({
   installQty = quantity,
   postalCode = '',
   travelSurcharge = 0,
+  // When true, rows keep the order passed in (a manual drag arrangement) instead
+  // of being re-sorted by price. Free items are still grouped at the bottom.
+  preserveOrder = false,
 }) {
   const doc = new jsPDF({ unit: 'mm', format: 'letter' });
   const pageWidth = doc.internal.pageSize.getWidth();
@@ -49,7 +52,9 @@ export function generateOptionsPDF({
   let y = 20;
 
   // === HEADER ===
-  doc.setFillColor(15, 23, 42);
+  // White header matching the app's white top bar: red QuickRev wordmark on a
+  // light background with dark-navy tagline text and a thin divider line.
+  doc.setFillColor(255, 255, 255);
   doc.rect(0, 0, pageWidth, 35, 'F');
 
   // QuickRev logo (red wordmark on transparent), vertically centred on the band.
@@ -58,10 +63,15 @@ export function generateOptionsPDF({
   const logoW = (lw / lh) * logoH;
   doc.addImage(quickrevLogo, 'PNG', margin, (35 - logoH) / 2, logoW, logoH);
 
+  doc.setTextColor(15, 23, 42);
   doc.setFontSize(10);
   doc.setFont('helvetica', 'normal');
   doc.text('Tire Options & Estimated Costs', margin, 26);
   doc.text('quickrev.ca', pageWidth - margin, 26, { align: 'right' });
+
+  doc.setDrawColor(226, 232, 240);
+  doc.setLineWidth(0.5);
+  doc.line(margin, 35, pageWidth - margin, 35);
 
   y = 42;
 
@@ -191,12 +201,17 @@ export function generateOptionsPDF({
     return { cells: row, price: tirePrice, isFree: !!tire.isFree };
   });
 
-  // Order the table for customers: by effective price per tire, lowest first,
+  // Default order for customers: by effective price per tire, lowest first,
   // with free items ($0.00 gifts/accessories) grouped at the very bottom.
-  rowMeta.sort((a, b) => {
-    if (a.isFree !== b.isFree) return a.isFree ? 1 : -1;
-    return (a.price || 0) - (b.price || 0);
-  });
+  // When the user has manually dragged the quote into a custom order
+  // (preserveOrder), respect that exact order — the PDF mirrors the
+  // on-screen quote panel.
+  if (!preserveOrder) {
+    rowMeta.sort((a, b) => {
+      if (a.isFree !== b.isFree) return a.isFree ? 1 : -1;
+      return (a.price || 0) - (b.price || 0);
+    });
+  }
   const rows = rowMeta.map(r => r.cells);
 
   // === TABLE HEADERS ===

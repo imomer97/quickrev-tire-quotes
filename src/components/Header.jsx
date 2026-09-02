@@ -14,13 +14,13 @@ export default function Header({ activeTab, setActiveTab, syncAllWarehouses, syn
   const syncing = syncAllRunning || syncProgress?.running;
 
   return (
-    <header className="bg-primary text-white sticky top-0 z-50 shadow-lg">
+    <header className="bg-white text-primary sticky top-0 z-50 shadow-lg">
       <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 px-3 md-px-6 py-2 md-py-3 max-w-7xl mx-auto">
         <div className="flex items-center gap-3">
           <img src={logoUrl} alt="QuickRev" className="h-6 md:h-7 w-auto shrink-0" />
         </div>
 
-        <div className="tab-nav bg-primary-light">
+        <div className="tab-nav">
           {tabs.map(tab => (
             <button
               key={tab.id}
@@ -49,8 +49,8 @@ export default function Header({ activeTab, setActiveTab, syncAllWarehouses, syn
             else if (ok) { color = 'var(--success)'; Icon = Cloud; label = 'Cloud synced'; title = 'Manual tires & edits are shared with your other devices.'; }
             return (
               <div
-                className="flex items-center gap-1.5 rounded-full px-2 py-1 text-xs text-white whitespace-nowrap"
-                style={{ background: err ? 'rgba(239,68,68,0.18)' : 'rgba(255,255,255,0.08)' }}
+                className="flex items-center gap-1.5 rounded-full px-2 py-1 text-xs text-primary whitespace-nowrap"
+                style={{ background: err ? 'rgba(239,68,68,0.16)' : 'rgba(15,23,42,0.07)' }}
                 title={title}
               >
                 <Icon className={`w-3.5 h-3.5 ${syncing ? 'animate-spin' : ''}`} style={{ color }} />
@@ -88,7 +88,7 @@ export default function Header({ activeTab, setActiveTab, syncAllWarehouses, syn
               {syncProgress.failed > 0 ? ' ⚠' : ' ✓'}
             </span>
           )}
-          <button className="btn btn-ghost text-white p-2 hide-sm" title="Settings">
+          <button className="btn btn-ghost text-primary p-2 hide-sm" title="Settings">
             <Settings className="w-5 h-5" />
           </button>
         </div>

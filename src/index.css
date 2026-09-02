@@ -165,6 +165,7 @@ body {
 
 .bg-primary { background: var(--primary); }
 .bg-primary-light { background: var(--primary-light); }
+.bg-white { background: #ffffff; }
 .bg-accent { background: var(--accent); }
 .bg-success { background: var(--success); }
 .bg-warning { background: var(--warning); }

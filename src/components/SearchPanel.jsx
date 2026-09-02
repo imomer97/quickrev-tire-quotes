@@ -1,8 +1,8 @@
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import {
   Search, Download, Check, X, Pencil, Trash2, ChevronDown,
   FileText, CheckSquare, Square, Filter, ArrowUpDown,
-  Car, Wrench, Info, Plus
+  Car, Wrench, Info, Plus, GripVertical, ListOrdered
 } from 'lucide-react';
 import {
   DISTRIBUTORS,
@@ -92,6 +92,9 @@ export default function SearchPanel({ tires, updateTire, deleteTire, addTire, bu
   // Each entry is a snapshot of the tire so the quote stays intact even if the
   // catalog is edited or the item is deleted later.
   const [quoteItems, setQuoteItems] = useState([]);
+  // When true, the user has manually dragged items into a custom order, which
+  // overrides the PDF's automatic price sort. Reset when the quote is cleared.
+  const [manualQuoteOrder, setManualQuoteOrder] = useState(false);
   // Expandable per-warehouse stock breakdown on a card
   const [expandedStockId, setExpandedStockId] = useState(null);
   // === RESULTS PAGINATION ===
@@ -448,6 +451,44 @@ export default function SearchPanel({ tires, updateTire, deleteTire, addTire, bu
   const clearQuote = () => {
     if (quoteItems.length === 0) return;
     setQuoteItems([]);
+    setManualQuoteOrder(false);
+  };
+
+  // === QUOTE DRAG-TO-REORDER ===
+  // Index of the item currently being dragged (native HTML5 drag-and-drop,
+  // no library needed). Reordering switches the quote into manual order mode,
+  // which the PDF respects instead of auto-sorting by price.
+  const dragIndex = useRef(null);
+  const reorderQuote = (from, to) => {
+    if (from === to) return;
+    setQuoteItems(prev => {
+      const next = [...prev];
+      const [moved] = next.splice(from, 1);
+      next.splice(to, 0, moved);
+      return next;
+    });
+    setManualQuoteOrder(true);
+  };
+
+  // === QUOTE ONE-CLICK SORT ===
+  // Reorders the quote list in place (Price low→high with free items last, or
+  // Brand A–Z). Applying a sort also pins the list as a manual order so the
+  // PDF renders the items exactly as shown here.
+  const sortQuoteList = (mode) => {
+    if (quoteItems.length < 2) return;
+    setQuoteItems(prev => {
+      const next = [...prev];
+      if (mode === 'price') {
+        next.sort((a, b) => {
+          if (a.isFree !== b.isFree) return a.isFree ? 1 : -1;
+          return (getEffectiveRetail(a) || 0) - (getEffectiveRetail(b) || 0);
+        });
+      } else if (mode === 'az') {
+        next.sort((a, b) => `${a.brand} ${a.model}`.localeCompare(`${b.brand} ${b.model}`));
+      }
+      return next;
+    });
+    setManualQuoteOrder(true);
   };
 
   // === PDF GENERATION ===
@@ -471,6 +512,8 @@ export default function SearchPanel({ tires, updateTire, deleteTire, addTire, bu
       installQty,
       postalCode,
       travelSurcharge: showInstall ? postalInfo.surcharge : 0,
+      // Manual drag order overrides the automatic price sort in the PDF.
+      preserveOrder: manualQuoteOrder,
     });
   };
 
@@ -745,10 +788,20 @@ ${stockText}
             </h2>
           </div>
           {quoteItems.length > 0 && (
-            <button className="btn btn-sm btn-ghost text-danger" onClick={clearQuote} title="Remove all items">
-              <Trash2 className="w-4 h-4" />
-              Clear All
-            </button>
+            <div className="flex items-center gap-1">
+              <button className="btn btn-sm btn-ghost" onClick={() => sortQuoteList('price')} title="Sort by price (low to high), free items last">
+                <ArrowUpDown className="w-4 h-4 text-accent" />
+                <span className="hide-sm">Price</span>
+                <span className="show-sm">$</span>
+              </button>
+              <button className="btn btn-sm btn-ghost" onClick={() => sortQuoteList('az')} title="Sort by brand (A–Z)">
+                A–Z
+              </button>
+              <button className="btn btn-sm btn-ghost text-danger" onClick={clearQuote} title="Remove all items">
+                <Trash2 className="w-4 h-4" />
+                Clear All
+              </button>
+            </div>
           )}
         </div>
         {quoteItems.length === 0 ? (
@@ -757,25 +810,45 @@ ${stockText}
             Items stay in the quote while you search for more, then click <span className="font-semibold">PDF</span> when done.
           </p>
         ) : (
-          <ul className="flex flex-col gap-2">
-            {quoteItems.map(item => {
-              const qCalc = getTireCalculations(item);
-              return (
-                <li key={item.id} className="flex items-center gap-3 border border-slate-200 rounded-lg px-3 py-2">
-                  <div className="flex-1 min-w-0">
-                    <span className="text-sm font-semibold mr-2">{item.brand} {item.model}</span>
-                    <span className="badge badge-gray font-mono">{item.size}</span>
-                    <span className="text-xs text-muted ml-2">
-                      {quantity} × {formatCurrency(qCalc.tireTotal)} = {formatCurrency(qCalc.tireTotal * quantity)}
-                    </span>
-                  </div>
-                  <button className="btn btn-sm btn-ghost p-1 text-danger" onClick={() => removeFromQuote(item.id)} title="Remove from quote">
-                    <X className="w-4 h-4" />
-                  </button>
-                </li>
-              );
-            })}
-          </ul>
+          <div>
+            <p className="text-xs text-muted mb-2 flex items-center gap-1">
+              <ListOrdered className="w-3.5 h-3.5" />
+              Drag items to arrange them manually — the PDF follows your order.
+            </p>
+            <ul className="flex flex-col gap-2">
+              {quoteItems.map((item, idx) => {
+                const qCalc = getTireCalculations(item);
+                return (
+                  <li
+                    key={item.id}
+                    draggable
+                    onDragStart={() => { dragIndex.current = idx; }}
+                    onDragEnter={() => {
+                      if (dragIndex.current == null || dragIndex.current === idx) return;
+                      reorderQuote(dragIndex.current, idx);
+                      dragIndex.current = idx;
+                    }}
+                    onDragOver={(e) => e.preventDefault()}
+                    onDragEnd={() => { dragIndex.current = null; }}
+                    className="flex items-center gap-3 border border-slate-200 rounded-lg px-3 py-2"
+                    style={{ cursor: 'grab' }}
+                  >
+                    <GripVertical className="w-4 h-4 text-muted shrink-0" />
+                    <div className="flex-1 min-w-0">
+                      <span className="text-sm font-semibold mr-2">{item.brand} {item.model}</span>
+                      <span className="badge badge-gray font-mono">{item.size}</span>
+                      <span className="text-xs text-muted ml-2">
+                        {quantity} × {formatCurrency(qCalc.tireTotal)} = {formatCurrency(qCalc.tireTotal * quantity)}
+                      </span>
+                    </div>
+                    <button className="btn btn-sm btn-ghost p-1 text-danger" onClick={() => removeFromQuote(item.id)} title="Remove from quote">
+                      <X className="w-4 h-4" />
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
         )}
       </div>
 
