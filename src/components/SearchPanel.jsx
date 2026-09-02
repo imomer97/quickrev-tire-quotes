@@ -24,19 +24,17 @@ import {
 } from '../data/distributors.js';
 import { generateOptionsPDF } from '../utils/pdfGenerator.js';
 
-export default function SearchPanel({ tires, updateTire, deleteTire, addTire, bulkUpdateTires, warehouseLocations }) {
+export default function SearchPanel({ tires, updateTire, deleteTire, addTire, bulkUpdateTires, warehouseLocations, distributors, onAddDistributor }) {
   // === SEARCH & FILTERS ===
   const [searchSize, setSearchSize] = useState('');
   const [quantity, setQuantity] = useState(4);
-  const [activeDistributors, setActiveDistributors] = useState(
-    new Set(DISTRIBUTORS.map(d => d.id))
-  );
+  const [activeDistributors, setActiveDistributors] = useState(new Set());
   // Canada Tire shows one option per synced warehouse (e.g. "Canada Tire —
   // Dartmouth, NS") so stock can be viewed per warehouse. The general
   // "Canada Tire" option means all warehouses (summed stock).
   const distributorOptions = useMemo(() => {
     const opts = [];
-    for (const d of DISTRIBUTORS) {
+    for (const d of distributors) {
       opts.push({ id: d.id, label: d.name });
       if (d.id === 'canadaTire') {
         for (const loc of warehouseLocations) {
@@ -45,18 +43,7 @@ export default function SearchPanel({ tires, updateTire, deleteTire, addTire, bu
       }
     }
     return opts;
-  }, [warehouseLocations]);
-  // Auto-check warehouse options as they load so they're on by default
-  useEffect(() => {
-    setActiveDistributors(prev => {
-      const next = new Set(prev);
-      let changed = false;
-      warehouseLocations.forEach(loc => {
-        if (!next.has(`ct:${loc}`)) { next.add(`ct:${loc}`); changed = true; }
-      });
-      return changed ? next : prev;
-    });
-  }, [warehouseLocations]);
+  }, [distributors, warehouseLocations]);
   // When exactly one Canada Tire warehouse is selected (and the general
   // "Canada Tire" option is off), stock refers to that warehouse only.
   const activeLocations = [...activeDistributors]
@@ -76,7 +63,7 @@ export default function SearchPanel({ tires, updateTire, deleteTire, addTire, bu
   const [activeSeasons, setActiveSeasons] = useState(new Set(SEASONS));
   const [sortBy, setSortBy] = useState('price-asc');
   const [showInstall, setShowInstall] = useState(true);
-  const [vehicleType, setVehicleType] = useState('sedan');
+  const [vehicleType, setVehicleType] = useState('');
   const [buyFromQuickRev, setBuyFromQuickRev] = useState(true);
   const [customerName, setCustomerName] = useState('');
   // PDF-only field: the size shown on the generated quote (independent of the search box)
@@ -124,6 +111,8 @@ export default function SearchPanel({ tires, updateTire, deleteTire, addTire, bu
     saleStart: '',
     saleEnd: '',
     clearSale: false,
+    includeInstall: '',
+    isFree: '',
   });
 
   // === ADD TIRE MODAL ===
@@ -136,6 +125,11 @@ export default function SearchPanel({ tires, updateTire, deleteTire, addTire, bu
     stock: '',
     season: 'All-Season',
     distributorId: 'canadaTire',
+    includeInstall: true,
+    isFree: false,
+    salePrice: '',
+    saleStart: '',
+    saleEnd: '',
   });
 
   // === TOGGLES ===
@@ -233,12 +227,14 @@ export default function SearchPanel({ tires, updateTire, deleteTire, addTire, bu
       const bParsed = parseTireSize(b.size);
       const aRetail = getEffectiveRetail(a);
       const bRetail = getEffectiveRetail(b);
-      const aTotal = aRetail + (showInstall && aParsed
+      const aInstall = showInstall && a.includeInstall !== false && aParsed
         ? calculateInstallationPerTire(aParsed.width, aParsed.aspect, aParsed.rim, vehicleType, buyFromQuickRev)
-        : 0);
-      const bTotal = bRetail + (showInstall && bParsed
+        : 0;
+      const bInstall = showInstall && b.includeInstall !== false && bParsed
         ? calculateInstallationPerTire(bParsed.width, bParsed.aspect, bParsed.rim, vehicleType, buyFromQuickRev)
-        : 0);
+        : 0;
+      const aTotal = aRetail + aInstall;
+      const bTotal = bRetail + bInstall;
 
       switch (sortBy) {
         case 'price-asc': return aTotal - bTotal;
@@ -274,11 +270,12 @@ export default function SearchPanel({ tires, updateTire, deleteTire, addTire, bu
       };
     }
 
-    const installPerTire = calculateInstallationPerTire(
+    const installEligible = showInstall && tire.includeInstall !== false;
+    const installPerTire = installEligible ? calculateInstallationPerTire(
       parsed.width, parsed.aspect, parsed.rim, vehicleType, buyFromQuickRev
-    );
+    ) : 0;
     // Combined pre-tax (tire at effective price + installation), HST on both
-    const preTax = showInstall ? retailPrice + installPerTire : retailPrice;
+    const preTax = installEligible ? retailPrice + installPerTire : retailPrice;
     const totalHST = preTax * HST_RATE;
 
     return {
@@ -322,6 +319,8 @@ export default function SearchPanel({ tires, updateTire, deleteTire, addTire, bu
       salePrice,
       saleStart: editForm.saleStart || null,
       saleEnd: editForm.saleEnd || null,
+      includeInstall: !!editForm.includeInstall,
+      isFree: !!editForm.isFree,
     });
     setEditingId(null);
     setEditForm({});
@@ -367,6 +366,8 @@ export default function SearchPanel({ tires, updateTire, deleteTire, addTire, bu
       updates.saleStart = null;
       updates.saleEnd = null;
     }
+    if (bulkForm.includeInstall !== '') updates.includeInstall = bulkForm.includeInstall === 'true';
+    if (bulkForm.isFree !== '') updates.isFree = bulkForm.isFree === 'true';
     // Increase / decrease the price (regular, pre-tax) by an amount or percentage
     if (bulkForm.adjustBy !== '') {
       const amt = parseFloat(bulkForm.adjustBy) || 0;
@@ -379,6 +380,7 @@ export default function SearchPanel({ tires, updateTire, deleteTire, addTire, bu
     setBulkForm({
       distributorId: '', stock: '', price: '', adjustMode: 'increase', adjustBy: '', adjustUnit: '$',
       season: '', salePrice: '', saleStart: '', saleEnd: '', clearSale: false,
+      includeInstall: '', isFree: '',
     });
   };
 
@@ -394,8 +396,14 @@ export default function SearchPanel({ tires, updateTire, deleteTire, addTire, bu
       size: newTireForm.size.toUpperCase(),
       wholesale: parseFloat(newTireForm.wholesale) || 0,
       stock: parseInt(newTireForm.stock, 10) || 0,
-      season: newTireForm.season,
+      season: newTireForm.season || 'All-Season',
       distributorId: newTireForm.distributorId,
+      includeInstall: newTireForm.includeInstall !== false,
+      isFree: !!newTireForm.isFree,
+      salePrice: newTireForm.salePrice !== '' && newTireForm.salePrice != null
+        ? parseFloat(newTireForm.salePrice) : undefined,
+      saleStart: newTireForm.saleStart || undefined,
+      saleEnd: newTireForm.saleEnd || undefined,
     });
     setNewTireForm({
       brand: '',
@@ -405,6 +413,11 @@ export default function SearchPanel({ tires, updateTire, deleteTire, addTire, bu
       stock: '',
       season: 'All-Season',
       distributorId: 'canadaTire',
+      includeInstall: true,
+      isFree: false,
+      salePrice: '',
+      saleStart: '',
+      saleEnd: '',
     });
     setShowAddModal(false);
   };
@@ -414,6 +427,10 @@ export default function SearchPanel({ tires, updateTire, deleteTire, addTire, bu
     const selectedTires = filteredTires.filter(t => selectedIds.has(t.id));
     if (selectedTires.length === 0) {
       alert('Select at least one tire to generate the PDF.');
+      return;
+    }
+    if (!vehicleType) {
+      alert('Please select a vehicle type before generating the PDF.');
       return;
     }
     generateOptionsPDF({
@@ -433,7 +450,7 @@ export default function SearchPanel({ tires, updateTire, deleteTire, addTire, bu
   // === COPY QUOTE TEXT ===
   const copyQuote = (tire) => {
     const calc = getTireCalculations(tire);
-    const installPerTire = showInstall ? (calc.installPerTire || 0) : 0;
+    const installPerTire = showInstall && tire.includeInstall !== false ? (calc.installPerTire || 0) : 0;
     const tiresTotal = calc.tireTotal * quantity;
     const installTotal = installPerTire > 0 ? installPerTire * installQty * (1 + HST_RATE) : 0;
     const travelSurcharge = showInstall ? postalInfo.surcharge : 0;
@@ -595,6 +612,7 @@ ${stockText}
                 value={vehicleType}
                 onChange={(e) => setVehicleType(e.target.value)}
               >
+                <option value="" disabled>Select vehicle type…</option>
                 {Object.entries(VEHICLE_LABELS).map(([k, v]) => (
                   <option key={k} value={k}>{v}</option>
                 ))}
@@ -752,19 +770,83 @@ ${stockText}
                 <select
                   className="input select"
                   value={newTireForm.season}
-                  onChange={(e) => setNewTireForm(f => ({ ...f, season: e.target.value }))}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setNewTireForm(f => ({ ...f, season: val, includeInstall: val === 'None' ? false : (f.includeInstall ?? true) }));
+                  }}
                 >
                   {SEASONS.map(s => <option key={s} value={s}>{s}</option>)}
                 </select>
+                <p className="text-xs text-muted mt-1">Select "None" for wheels, rims, TPMS sensors, and accessories.</p>
+              </div>
+              <div className="flex gap-4">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={newTireForm.includeInstall ?? true}
+                    onChange={(e) => setNewTireForm(f => ({ ...f, includeInstall: e.target.checked }))}
+                  />
+                  <span className="text-sm">Installation applies to this item</span>
+                </label>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={!!newTireForm.isFree}
+                    onChange={(e) => setNewTireForm(f => ({ ...f, isFree: e.target.checked }))}
+                  />
+                  <span className="text-sm">Free item (price $0)</span>
+                </label>
+              </div>
+              <div>
+                <label className="text-sm font-medium mb-1 block">Sale Price ($) — optional</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  className="input"
+                  placeholder="e.g., 59.99"
+                  value={newTireForm.salePrice}
+                  onChange={(e) => setNewTireForm(f => ({ ...f, salePrice: e.target.value }))}
+                />
+              </div>
+              <div className="flex gap-3">
+                <div className="flex-1">
+                  <label className="text-sm font-medium mb-1 block">Sale Start (optional)</label>
+                  <input
+                    type="date"
+                    className="input"
+                    value={newTireForm.saleStart}
+                    onChange={(e) => setNewTireForm(f => ({ ...f, saleStart: e.target.value }))}
+                  />
+                </div>
+                <div className="flex-1">
+                  <label className="text-sm font-medium mb-1 block">Sale End (optional)</label>
+                  <input
+                    type="date"
+                    className="input"
+                    value={newTireForm.saleEnd}
+                    onChange={(e) => setNewTireForm(f => ({ ...f, saleEnd: e.target.value }))}
+                  />
+                </div>
               </div>
               <div>
                 <label className="text-sm font-medium mb-1 block">Distributor</label>
                 <select
                   className="input select"
                   value={newTireForm.distributorId}
-                  onChange={(e) => setNewTireForm(f => ({ ...f, distributorId: e.target.value }))}
+                  onChange={(e) => {
+                    if (e.target.value === '__new__') {
+                      const name = window.prompt('New distributor name:');
+                      if (name && name.trim()) {
+                        const id = onAddDistributor(name.trim());
+                        if (id) setNewTireForm(f => ({ ...f, distributorId: id }));
+                      }
+                    } else {
+                      setNewTireForm(f => ({ ...f, distributorId: e.target.value }));
+                    }
+                  }}
                 >
-                  {DISTRIBUTORS.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
+                  {distributors.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
+                  <option value="__new__">+ New distributor…</option>
                 </select>
               </div>
             </div>
@@ -785,6 +867,11 @@ ${stockText}
                     stock: '',
                     season: 'All-Season',
                     distributorId: 'canadaTire',
+                    includeInstall: true,
+                    isFree: false,
+                    salePrice: '',
+                    saleStart: '',
+                    saleEnd: '',
                   });
                 }}
               >
@@ -834,7 +921,7 @@ ${stockText}
                 onChange={(e) => setBulkForm(f => ({ ...f, distributorId: e.target.value }))}
               >
                 <option value="">— Leave unchanged —</option>
-                {DISTRIBUTORS.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
+                {distributors.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
               </select>
             </div>
             <div>
@@ -927,6 +1014,30 @@ ${stockText}
                 onChange={(e) => setBulkForm(f => ({ ...f, saleEnd: e.target.value }))}
               />
             </div>
+            <div>
+              <label className="text-xs font-semibold text-muted mb-1 block uppercase">Install</label>
+              <select
+                className="input select w-32"
+                value={bulkForm.includeInstall}
+                onChange={(e) => setBulkForm(f => ({ ...f, includeInstall: e.target.value }))}
+              >
+                <option value="">— Leave unchanged —</option>
+                <option value="true">Included</option>
+                <option value="false">Not included</option>
+              </select>
+            </div>
+            <div>
+              <label className="text-xs font-semibold text-muted mb-1 block uppercase">Free</label>
+              <select
+                className="input select w-28"
+                value={bulkForm.isFree}
+                onChange={(e) => setBulkForm(f => ({ ...f, isFree: e.target.value }))}
+              >
+                <option value="">— Leave unchanged —</option>
+                <option value="true">Free ($0)</option>
+                <option value="false">Paid</option>
+              </select>
+            </div>
             <label className="flex items-center gap-2 cursor-pointer pb-2">
               <input
                 type="checkbox"
@@ -957,7 +1068,7 @@ ${stockText}
             const installPerTire = calc.installPerTire || 0;
             const tiresSubtotal = calc.tireTotal * quantity;
             // Installation applies only to the number of tires to be installed (installQty)
-            const installTotal = showInstall ? installPerTire * installQty : 0;
+            const installTotal = (showInstall && tire.includeInstall !== false) ? installPerTire * installQty : 0;
             const installTaxInclusive = installTotal * (1 + HST_RATE);
             // Travel surcharge is per job and applies only when a service visit is included
             const travelSurcharge = showInstall ? postalInfo.surcharge : 0;
@@ -1065,7 +1176,7 @@ ${stockText}
                       value={editForm.distributorId || ''}
                       onChange={(e) => setEditForm(f => ({ ...f, distributorId: e.target.value }))}
                     >
-                      {DISTRIBUTORS.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
+                      {distributors.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
                     </select>
                   )}
                   {/* Sale badge with start/end dates */}
@@ -1138,6 +1249,22 @@ ${stockText}
                         onChange={(e) => setEditForm(f => ({ ...f, saleEnd: e.target.value }))}
                       />
                     </div>
+                    <label className="flex items-center gap-2 cursor-pointer pt-5">
+                      <input
+                        type="checkbox"
+                        checked={editForm.includeInstall !== false}
+                        onChange={(e) => setEditForm(f => ({ ...f, includeInstall: e.target.checked }))}
+                      />
+                      <span className="text-xs font-medium">Include installation for this item</span>
+                    </label>
+                    <label className="flex items-center gap-2 cursor-pointer pt-5">
+                      <input
+                        type="checkbox"
+                        checked={!!editForm.isFree}
+                        onChange={(e) => setEditForm(f => ({ ...f, isFree: e.target.checked }))}
+                      />
+                      <span className="text-xs font-medium">Free item ($0)</span>
+                    </label>
                   </div>
                 )}
 
@@ -1191,7 +1318,7 @@ ${stockText}
                   )}
 
                   {/* Installation Pre-Tax (NEW) */}
-                  {showInstall && calc.installPerTire > 0 && (
+                  {showInstall && tire.includeInstall !== false && calc.installPerTire > 0 && (
                     <>
                       <div className="price-row">
                         <span className="text-sm">+ Installation (pre-tax)</span>

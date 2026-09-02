@@ -30,6 +30,9 @@ export default function App() {
     addWarehouseLocations,
     fetchWarehouseLocations,
     cloudSyncStatus,
+    distributors,
+    addDistributor,
+    removeDistributor,
   } = useTireData();
 
   return (
@@ -52,6 +55,8 @@ export default function App() {
             bulkUpdateTires={bulkUpdateTires}
             warehouseLocations={warehouseLocations}
             lastSyncAt={lastSyncAt}
+            distributors={distributors}
+            onAddDistributor={addDistributor}
           />
         )}
         {activeTab === 'import' && (
@@ -74,6 +79,9 @@ export default function App() {
             exportData={exportData}
             importData={importData}
             cloudStatus={cloudSyncStatus}
+            distributors={distributors}
+            addDistributor={addDistributor}
+            removeDistributor={removeDistributor}
           />
         )}
       </main>

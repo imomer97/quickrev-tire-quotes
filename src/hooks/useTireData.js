@@ -3,6 +3,7 @@ import { DISTRIBUTORS, getTierForBrand, SEASONS, calculateRetailPrice } from '..
 
 const STORAGE_KEY = 'quickrev_tire_inventory';
 const LOCATIONS_KEY = 'quickrev_ct_locations';
+const CUSTOM_DIST_KEY = 'quickrev_custom_distributors';
 const LAST_SYNC_KEY = 'quickrev_ct_last_sync';
 
 // Safety cap: a broad Canada Tire sync can return thousands of tires, which
@@ -43,21 +44,26 @@ function normalizeSeason(rawSeason) {
   return 'All-Season';
 }
 
+function distributorIdFromName(name) {
+  const slug = String(name).toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+  return slug ? 'custom_' + slug : 'custom_dist';
+}
+
 /**
  * Normalize distributor ID
  * Handles case-insensitive matching and variations
  */
-function normalizeDistributor(rawDistributor) {
+function normalizeDistributor(rawDistributor, distributors = DISTRIBUTORS) {
   if (!rawDistributor || rawDistributor.trim() === '') return null;
   
   const normalized = rawDistributor.toLowerCase().trim();
   
   // Check exact match first
-  const dist = DISTRIBUTORS.find(d => d.id === rawDistributor);
+  const dist = distributors.find(d => d.id === rawDistributor);
   if (dist) return dist.id;
   
   // Check case-insensitive name match
-  const byName = DISTRIBUTORS.find(d => d.name.toLowerCase() === normalized);
+  const byName = distributors.find(d => d.name.toLowerCase() === normalized);
   if (byName) return byName.id;
   
   // Check partial match (e.g., "Canada Tire" → "canadaTire")
@@ -87,6 +93,14 @@ export function useTireData() {
   });
 
   const [lastSyncAt, setLastSyncAt] = useState(() => localStorage.getItem(LAST_SYNC_KEY) || null);
+  const [customDistributors, setCustomDistributors] = useState(() => {
+    try {
+      const stored = localStorage.getItem(CUSTOM_DIST_KEY);
+      return stored ? JSON.parse(stored) : [];
+    } catch {
+      return [];
+    }
+  });
   const [syncAllRunning, setSyncAllRunning] = useState(false);
   // Live progress for the header sync button, e.g.
   // { running: true, current: 2, total: 6, location: 'Toronto, ON' }
@@ -103,6 +117,12 @@ export function useTireData() {
   tiresRef.current = tires;
   const locationsRef = useRef(warehouseLocations);
   locationsRef.current = warehouseLocations;
+  const customDistRef = useRef(customDistributors);
+  customDistRef.current = customDistributors;
+
+  useEffect(() => {
+    localStorage.setItem(CUSTOM_DIST_KEY, JSON.stringify(customDistributors));
+  }, [customDistributors]);
 
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(tires));
@@ -434,7 +454,7 @@ export function useTireData() {
       .map((row, idx) => {
         // Try multiple column name variations (case-insensitive)
         const rawDistributor = row.distributor || row.Distributor || row.source || row.Source;
-        const distributorId = normalizeDistributor(rawDistributor);
+        const distributorId = normalizeDistributor(rawDistributor, getAllDistributors());
         
         if (!rawDistributor) {
           console.warn('⚠️  No distributor specified for row', idx + 1, ':', {
@@ -602,6 +622,13 @@ export function useTireData() {
       if (Array.isArray(data.warehouseLocations) && data.warehouseLocations.length) {
         setWarehouseLocations(prev => [...new Set([...prev, ...data.warehouseLocations])].sort());
       }
+      if (Array.isArray(data.customDistributors) && data.customDistributors.length) {
+        setCustomDistributors(prev => {
+          const map = new Map();
+          [...DISTRIBUTORS, ...prev, ...data.customDistributors].forEach(d => map.set(d.id, d));
+          return [...map.values()].filter(d => !DISTRIBUTORS.some(b => b.id === d.id));
+        });
+      }
       setCloudSyncStatus('ok');
       return { success: true };
     } catch (err) {
@@ -639,6 +666,7 @@ export function useTireData() {
           overrides,
           deletedKeys: [...deletedKeysRef.current],
           warehouseLocations: locationsRef.current,
+          customDistributors: customDistRef.current,
         }),
       });
       if (!res.ok) throw new Error('HTTP ' + res.status);
@@ -673,9 +701,28 @@ export function useTireData() {
     return () => clearTimeout(pushTimerRef.current);
   }, [tires, warehouseLocations, pushServerData]);
 
-  const getDistributorName = useCallback((id) => {
-    return DISTRIBUTORS.find(d => d.id === id)?.name || id;
+  const getAllDistributors = useCallback(() => [...DISTRIBUTORS, ...customDistributors], [customDistributors]);
+
+  const addDistributor = useCallback((name) => {
+    const trimmed = String(name || '').trim();
+    if (!trimmed) return null;
+    const all = getAllDistributors();
+    const existing = all.find(d => d.name.toLowerCase() === trimmed.toLowerCase());
+    if (existing) return existing.id;
+    const id = distributorIdFromName(trimmed);
+    setCustomDistributors(prev => (
+      prev.some(d => d.id === id) ? prev : [...prev, { id, name: trimmed, hasApi: false }]
+    ));
+    return id;
+  }, [getAllDistributors]);
+
+  const removeDistributor = useCallback((id) => {
+    setCustomDistributors(prev => prev.filter(d => d.id !== id));
   }, []);
+
+  const getDistributorName = useCallback((id) => {
+    return getAllDistributors().find(d => d.id === id)?.name || id;
+  }, [getAllDistributors]);
 
   return {
     tires,
@@ -694,6 +741,9 @@ export function useTireData() {
     importFromCSV,
     loadSampleData,
     getDistributorName,
+    distributors: getAllDistributors(),
+    addDistributor,
+    removeDistributor,
     exportData,
     importData,
     cloudSyncStatus,

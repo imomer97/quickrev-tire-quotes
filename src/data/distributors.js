@@ -49,7 +49,7 @@ export const VEHICLE_LABELS = {
 };
 
 // ========== SEASONS ==========
-export const SEASONS = ['All-Season', 'Winter', 'All-Weather', 'All-Terrain'];
+export const SEASONS = ['All-Season', 'Winter', 'All-Weather', 'All-Terrain', 'None'];
 
 // ========== DISTRIBUTORS ==========
 export const DISTRIBUTORS = [
@@ -261,6 +261,7 @@ export function formatSize(sizeStr) {
  * otherwise the standard wholesale + env fee + markup retail price.
  */
 export function getRegularPrice(tire) {
+  if (tire && tire.isFree) return 0;
   if (typeof tire.price === 'number' && tire.price > 0) return tire.price;
   return calculateRetailPrice(tire.wholesale);
 }

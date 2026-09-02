@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from 'react';
 import { Upload, Trash2, Database, AlertCircle, CheckCircle, RefreshCw, Search, Download } from 'lucide-react';
 import Papa from 'papaparse';
 
-export default function ImportPanel({ tires, importFromCSV, clearAll, loadSampleData, deleteTires, syncCanadaTire, syncAllWarehouses, syncAllRunning, checkApiHealth, apiStatus, isLoading, warehouseLocations, lastSyncAt, fetchWarehouseLocations, addWarehouseLocations, exportData, importData, cloudStatus }) {
+export default function ImportPanel({ tires, importFromCSV, clearAll, loadSampleData, deleteTires, syncCanadaTire, syncAllWarehouses, syncAllRunning, checkApiHealth, apiStatus, isLoading, warehouseLocations, lastSyncAt, fetchWarehouseLocations, addWarehouseLocations, exportData, importData, cloudStatus, distributors, addDistributor, removeDistributor }) {
   const [dragActive, setDragActive] = useState(false);
   const [importResult, setImportResult] = useState(null);
   const [selectedRows, setSelectedRows] = useState(new Set());
@@ -11,6 +11,7 @@ export default function ImportPanel({ tires, importFromCSV, clearAll, loadSample
   const [confirmAction, setConfirmAction] = useState(null); // { type: 'deleteSelected' | 'clearAll' | 'importBackup' }
   const [pendingImport, setPendingImport] = useState(null); // backup text awaiting confirm
   const [page, setPage] = useState(1);
+  const [newDistName, setNewDistName] = useState('');
   const ROWS_PER_PAGE = 100;
   const fileInputRef = useRef(null);
   const jsonInputRef = useRef(null);
@@ -359,6 +360,54 @@ export default function ImportPanel({ tires, importFromCSV, clearAll, loadSample
           )}
         </div>
         <p className="text-sm text-muted mt-3">{tires.length} tire(s) in database</p>
+      </div>
+
+      {/* === DISTRIBUTORS === */}
+      <div className="card p-6">
+        <h2 className="text-lg font-semibold mb-4 flex items-center gap-2">
+          <Database className="w-5 h-5 text-accent" />
+          Distributors
+        </h2>
+        <div className="flex gap-2 mb-3 max-w-md">
+          <input
+            type="text"
+            className="input"
+            placeholder="New distributor name"
+            value={newDistName}
+            onChange={(e) => setNewDistName(e.target.value)}
+          />
+          <button
+            className="btn btn-primary"
+            onClick={() => {
+              if (newDistName.trim()) { addDistributor(newDistName.trim()); setNewDistName(''); }
+            }}
+          >
+            Add Distributor
+          </button>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {distributors.map(d => (
+            <span key={d.id} className="badge badge-gray flex items-center gap-1">
+              {d.name}
+              {d.hasApi && <span className="text-xs text-muted">(API)</span>}
+              {!['canadaTire', 'starTires', 'convenient'].includes(d.id) && (
+                <button
+                  className="ml-1 text-danger"
+                  title="Remove distributor"
+                  onClick={() => {
+                    if (window.confirm(`Remove distributor "${d.name}"?`)) removeDistributor(d.id);
+                  }}
+                >
+                  ×
+                </button>
+              )}
+            </span>
+          ))}
+        </div>
+        <p className="text-xs text-muted mt-2">
+          Custom distributors appear in the search filters and on the Add Tire form.
+          New distributors are shared across your devices with cloud sync.
+        </p>
       </div>
 
       {/* === INVENTORY TABLE === */}
