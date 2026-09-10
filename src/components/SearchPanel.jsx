@@ -78,6 +78,8 @@ export default function SearchPanel({ tires, updateTire, deleteTire, addTire, bu
   const [activeBoltPatterns, setActiveBoltPatterns] = useState(new Set());
   // Wheel diameter filter (e.g. "17", "20") in inches
   const [activeDiameters, setActiveDiameters] = useState(new Set());
+  // Wheel width filter (e.g. 7, 7.5, 8.5) in inches
+  const [activeWidths, setActiveWidths] = useState(new Set());
   const [showBoltPatternInput, setShowBoltPatternInput] = useState(false);
   const [boltPatternInput, setBoltPatternInput] = useState('');
   // Free-text fitment tags (e.g. "2019 Escape", "MiniSuv", "M14X1.5")
@@ -221,6 +223,15 @@ export default function SearchPanel({ tires, updateTire, deleteTire, addTire, bu
     });
   };
 
+  const toggleWheelWidth = (w) => {
+    setActiveWidths(prev => {
+      const next = new Set(prev);
+      if (next.has(w)) next.delete(w);
+      else next.add(w);
+      return next;
+    });
+  };
+
   const toggleFitment = (f) => {
     setActiveFitments(prev => {
       const next = new Set(prev);
@@ -264,6 +275,16 @@ export default function SearchPanel({ tires, updateTire, deleteTire, addTire, bu
         .map(t => parseWheelSize(t.size))
         .filter(w => w && w.diameter != null)
         .map(w => w.diameter)
+    )].sort((a, b) => a - b),
+    [tires]
+  );
+  // Distinct wheel widths (inches, e.g. 7.5), sorted numerically
+  const wheelWidths = useMemo(
+    () => [...new Set(
+      tires.filter(t => getCategory(t) === 'wheel')
+        .map(t => parseWheelSize(t.size))
+        .filter(w => w && w.width != null)
+        .map(w => w.width)
     )].sort((a, b) => a - b),
     [tires]
   );
@@ -325,6 +346,11 @@ export default function SearchPanel({ tires, updateTire, deleteTire, addTire, bu
         const w = parseWheelSize(tire.size);
         if (!w || w.diameter == null || !activeDiameters.has(w.diameter)) return false;
       }
+      // Wheel width filter — same rule: wheels only (e.g. 7, 7.5, 8.5 inches).
+      if (getCategory(tire) === 'wheel' && activeWidths.size > 0) {
+        const w = parseWheelSize(tire.size);
+        if (!w || w.width == null || !activeWidths.has(w.width)) return false;
+      }
       // Vehicle fitment filter — free-text, matches against size, brand, model,
       // and a dedicated fitment string if the item carries one.
       if (activeFitments.size > 0) {
@@ -366,7 +392,7 @@ export default function SearchPanel({ tires, updateTire, deleteTire, addTire, bu
     });
 
     return results;
-  }, [tires, searchSize, activeDistributors, activeTiers, activeSeasons, activeCategories, activeBoltPatterns, activeDiameters, activeFitments, inStockOnly, minStock, sortBy, showInstall, vehicleType, buyFromQuickRev, getTireStock, getEffectiveRetail]);
+  }, [tires, searchSize, activeDistributors, activeTiers, activeSeasons, activeCategories, activeBoltPatterns, activeDiameters, activeWidths, activeFitments, inStockOnly, minStock, sortBy, showInstall, vehicleType, buyFromQuickRev, getTireStock, getEffectiveRetail]);
 
   function getTireCalculations(tire) {
     const parsed = parseTireSize(tire.size) || parseWheelSize(tire.size);
@@ -867,6 +893,29 @@ ${stockText}
                   </div>
                 </div>
               )}
+              {wheelWidths.length > 0 && (
+                <div className="mt-2">
+                  <p className="text-xs font-semibold text-muted mb-2 uppercase">Width (inches)</p>
+                  <div className="flex flex-wrap gap-2">
+                    {wheelWidths.map(wd => (
+                      <button
+                        key={wd}
+                        type="button"
+                        onClick={() => toggleWheelWidth(wd)}
+                        style={{
+                          padding: '2px 10px', fontSize: '0.75rem', borderRadius: 6,
+                          border: '1px solid ' + (activeWidths.has(wd) ? '#0f172a' : '#cbd5e1'),
+                          background: activeWidths.has(wd) ? '#0f172a' : '#fff',
+                          color: activeWidths.has(wd) ? '#fff' : '#334155',
+                          fontFamily: 'monospace', cursor: 'pointer',
+                        }}
+                      >
+                        {wd}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
 
             <div>
@@ -900,11 +949,11 @@ ${stockText}
                     }
                   }}
                 />
-                {(activeBoltPatterns.size > 0 || activeFitments.size > 0) && (
+                {(activeBoltPatterns.size > 0 || activeDiameters.size > 0 || activeWidths.size > 0 || activeFitments.size > 0) && (
                   <button
                     type="button"
                     className="text-xs text-danger font-medium"
-                    onClick={() => { setActiveBoltPatterns(new Set()); setActiveDiameters(new Set()); setActiveFitments(new Set()); }}
+                    onClick={() => { setActiveBoltPatterns(new Set()); setActiveDiameters(new Set()); setActiveWidths(new Set()); setActiveFitments(new Set()); }}
                   >
                     Clear fitment filters
                   </button>
