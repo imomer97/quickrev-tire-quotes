@@ -120,21 +120,40 @@ export function isTpmsItem(item) {
 }
 
 /**
- * Calculate the purchase cost (wholesale + env fee)
- * This is what QuickRev pays the distributor
+ * Per-item installation fee override (set in the card edit form). Falls back
+ * to TPMS flat fee, then the size-based tire installation rate.
  */
-export function calculatePurchaseCost(wholesale) {
+export function getInstallFeeForItem(item, parsed, vehicleType, buyFromQuickRev) {
+  if (item && item.installFee != null && item.installFee !== '') {
+    const v = parseFloat(item.installFee);
+    if (Number.isFinite(v)) return v;
+  }
+  if (isTpmsItem(item)) return TPMS_PROGRAM_FEE;
+  if (!parsed) return 0;
+  return calculateInstallationPerTire(parsed.width, parsed.aspect, parsed.rim, vehicleType, buyFromQuickRev);
+}
+
+/**
+ * Calculate the purchase cost.
+ * The environmental fee is a TIRE fee — wheels and auto parts do not carry it.
+ */
+export function calculatePurchaseCost(wholesale, item) {
   const w = parseFloat(wholesale) || 0;
-  return w + ENV_FEE_PER_TIRE;
+  return w + (getCategory(item) === 'tire' ? ENV_FEE_PER_TIRE : 0);
 }
 
 /**
  * Calculate the retail tire price before HST (tire only)
  * purchase cost + markup
  */
-export function calculateRetailPrice(wholesale) {
-  const purchaseCost = calculatePurchaseCost(wholesale);
-  return purchaseCost + MARKUP_PER_TIRE;
+export function calculateRetailPrice(wholesale, item) {
+  const purchaseCost = calculatePurchaseCost(wholesale, item);
+  // Per-item markup override wins; otherwise tires use the standard markup and
+  // wheels/parts carry no markup by default.
+  const markup = item && item.markupOverride != null && Number.isFinite(parseFloat(item.markupOverride))
+    ? parseFloat(item.markupOverride)
+    : (getCategory(item) === 'tire' ? MARKUP_PER_TIRE : 0);
+  return purchaseCost + markup;
 }
 
 /**
@@ -333,7 +352,7 @@ export function getRegularPrice(tire) {
   if (tire && tire.isFree) return 0;
   const priceOverride = parseFloat(tire.price);
   if (Number.isFinite(priceOverride) && priceOverride > 0) return priceOverride;
-  return calculateRetailPrice(tire.wholesale);
+  return calculateRetailPrice(tire.wholesale, tire);
 }
 
 /**

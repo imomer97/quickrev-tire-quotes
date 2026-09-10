@@ -29,6 +29,7 @@ import {
   resolvePostalCode,
   TPMS_PROGRAM_FEE,
   isTpmsItem,
+  getInstallFeeForItem,
 } from '../data/distributors.js';
 import { generateOptionsPDF } from '../utils/pdfGenerator.js';
 
@@ -406,7 +407,7 @@ export default function SearchPanel({ tires, updateTire, deleteTire, addTire, bu
 
     if (!parsed && !tpms) {
       return {
-        purchaseCost: calculatePurchaseCost(tire.wholesale),
+        purchaseCost: calculatePurchaseCost(tire.wholesale, tire),
         retailPrice,
         regularPrice: getRegularPrice(tire),
         hst,
@@ -416,23 +417,21 @@ export default function SearchPanel({ tires, updateTire, deleteTire, addTire, bu
         totalPreTax: retailPrice,
         totalHST: hst,
         totalPerTire: tireTotal,
+        category: getCategory(tire),
+        envFee: getCategory(tire) === 'tire' ? ENV_FEE_PER_TIRE : 0,
       };
     }
 
     const installEligible = showInstall && tire.includeInstall !== false && (tpms || parsed);
     const installPerTire = installEligible
-      ? (tpms
-          ? TPMS_PROGRAM_FEE
-          : calculateInstallationPerTire(
-              parsed.width, parsed.aspect, parsed.rim, vehicleType, buyFromQuickRev
-            ))
+      ? getInstallFeeForItem(tire, parsed, vehicleType, buyFromQuickRev)
       : 0;
     // Combined pre-tax (tire at effective price + installation), HST on both
     const preTax = installEligible ? retailPrice + installPerTire : retailPrice;
     const totalHST = preTax * HST_RATE;
 
     return {
-      purchaseCost: calculatePurchaseCost(tire.wholesale),
+      purchaseCost: calculatePurchaseCost(tire.wholesale, tire),
       retailPrice,
       regularPrice: getRegularPrice(tire),
       hst,
@@ -442,6 +441,8 @@ export default function SearchPanel({ tires, updateTire, deleteTire, addTire, bu
       totalPreTax: preTax,
       totalHST,
       totalPerTire: preTax + totalHST,
+      category: getCategory(tire),
+      envFee: getCategory(tire) === 'tire' ? ENV_FEE_PER_TIRE : 0,
     };
   }
 
@@ -466,6 +467,8 @@ export default function SearchPanel({ tires, updateTire, deleteTire, addTire, bu
       category: editForm.category || 'tire',
       fitment: (editForm.fitment || '').trim() || null,
       wholesale: parseFloat(editForm.wholesale) || 0,
+      markupOverride: (editForm.markupOverride === '' || editForm.markupOverride == null) ? null : parseFloat(editForm.markupOverride) || null,
+      installFee: (editForm.installFee === '' || editForm.installFee == null) ? null : parseFloat(editForm.installFee) || null,
       stock: parseInt(editForm.stock, 10) || 0,
       season: editForm.season,
       distributorId,
@@ -1735,6 +1738,28 @@ ${stockText}
                       />
                     </div>
                     <div>
+                      <span className="text-xs text-muted">Markup $ (blank = default)</span>
+                      <input
+                        type="number"
+                        step="0.01"
+                        className="input text-sm w-24"
+                        value={editForm.markupOverride ?? ''}
+                        onChange={(e) => setEditForm(f => ({ ...f, markupOverride: e.target.value }))}
+                        placeholder={getCategory(tire) === 'tire' ? String(MARKUP_PER_TIRE) : '0'}
+                      />
+                    </div>
+                    <div>
+                      <span className="text-xs text-muted">Install fee $ (blank = auto)</span>
+                      <input
+                        type="number"
+                        step="0.01"
+                        className="input text-sm w-24"
+                        value={editForm.installFee ?? ''}
+                        onChange={(e) => setEditForm(f => ({ ...f, installFee: e.target.value }))}
+                        placeholder="Auto"
+                      />
+                    </div>
+                    <div>
                       <span className="text-xs text-muted">Stock</span>
                       <input
                         type="number"
@@ -1802,29 +1827,33 @@ ${stockText}
 
                 {/* FIXED: Price Breakdown with Installation Tax Included */}
                 <div className="bg-slate-50 rounded-lg p-3 mb-3">
-                  <p className="text-xs font-semibold text-muted mb-2 uppercase tracking-wide">Cost Breakdown (per tire)</p>
+                  <p className="text-xs font-semibold text-muted mb-2 uppercase tracking-wide">Cost Breakdown (per item)</p>
 
                   {/* Tire Only */}
                   <div className="price-row">
                     <span className="text-sm">Wholesale (purchase)</span>
                     <span className="text-sm font-mono">{formatCurrency(tire.wholesale)}</span>
                   </div>
-                  <div className="price-row">
-                    <span className="text-sm">+ Env fee</span>
-                    <span className="text-sm font-mono text-success">{formatCurrency(ENV_FEE_PER_TIRE)}</span>
-                  </div>
+                  {calc.envFee > 0 && (
+                    <div className="price-row">
+                      <span className="text-sm">+ Env fee</span>
+                      <span className="text-sm font-mono text-success">{formatCurrency(calc.envFee)}</span>
+                    </div>
+                  )}
                   <div className="price-row">
                     <span className="text-sm font-medium">Purchase cost</span>
                     <span className="text-sm font-mono font-medium">{formatCurrency(calc.purchaseCost)}</span>
                   </div>
                   <div className="border-t my-1" />
-                  <div className="price-row">
-                    <span className="text-sm">+ Markup</span>
-                    <span className="text-sm font-mono text-success">{formatCurrency(MARKUP_PER_TIRE)}</span>
-                  </div>
+                  {calc.category === 'tire' && (
+                    <div className="price-row">
+                      <span className="text-sm">+ Markup</span>
+                      <span className="text-sm font-mono text-success">{formatCurrency(calc.retailPrice - calc.purchaseCost)}</span>
+                    </div>
+                  )}
                   <div className="price-row">
                     <span className="text-sm font-medium">
-                      Tire (pre-tax)
+                      {calc.category === 'tire' ? 'Tire (pre-tax)' : calc.category === 'wheel' ? 'Item price (pre-tax)' : 'Part price (pre-tax)'}
                       {calc.sale.saleActive && <span className="text-xs text-warning ml-1">Sale!</span>}
                     </span>
                     <span className="text-sm font-mono font-medium">
@@ -1885,7 +1914,7 @@ ${stockText}
                 {/* Quantity Totals */}
                 <div className="bg-primary text-white rounded-lg p-3 mb-3">
                   <div className="flex justify-between items-center mb-1">
-                    <span className="text-sm opacity-80">{quantity} tires × {formatCurrency(calc.tireTotal)}</span>
+                    <span className="text-sm opacity-80">{quantity} × {formatCurrency(calc.tireTotal)}</span>
                     <span className="text-sm font-mono">{formatCurrency(tiresSubtotal)}</span>
                   </div>
                   {showInstall && installTotal > 0 && (

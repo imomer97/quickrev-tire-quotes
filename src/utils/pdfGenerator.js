@@ -12,6 +12,7 @@ import {
   getEffectiveRetail,
   TPMS_PROGRAM_FEE,
   isTpmsItem,
+  getInstallFeeForItem,
 } from '../data/distributors.js';
 
 /** Compact date like "Aug 15" for the sale-period column */
@@ -174,11 +175,8 @@ export function generateOptionsPDF({
     let grandTotal;
 
     if (installEligible) {
-      installPerTire = tpms
-        ? TPMS_PROGRAM_FEE
-        : calculateInstallationPerTire(
-            parsed.width, parsed.aspect, parsed.rim, vehicleType, buyFromQuickRev
-          );
+      // Per-item override > TPMS flat fee > size-based tire rate
+      installPerTire = getInstallFeeForItem(tire, parsed, vehicleType, buyFromQuickRev);
       // Installation applies only to the number of tires to be installed (installQty)
       const installTotal = installPerTire * installQty;
       const preTax = tirePrice * quantity + installTotal;
@@ -380,7 +378,8 @@ export function generateOptionsPDF({
     }
 
     // TPMS sensors: flat per-sensor programming fee (different from tire install rates)
-    if (tires.some(isTpmsItem)) {
+    // Only mention it when the TPMS fee is NOT overridden per-item.
+    if (tires.some(t => isTpmsItem(t) && (t.installFee == null || t.installFee === ''))) {
       notes.push(`• TPMS sensor programming: ${formatCurrency(TPMS_PROGRAM_FEE)} per sensor (flat rate)`);
     }
 
