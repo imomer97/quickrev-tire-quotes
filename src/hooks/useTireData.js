@@ -482,6 +482,7 @@ export function useTireData() {
           wholesale: parseFloat(row.wholesale || row.Wholesale || row.cost || row.Cost || row.price || row.Price || 0),
           stock: parseInt(row.stock || row.Stock || row.qty || row.Qty || row.quantity || row.Quantity || 0, 10),
           season,
+          fitment: (row.fitment || row.Fitment || '').toString().trim() || undefined,
           distributorId: finalDistributorId,
           tier: getTierForBrand(finalDistributorId, brand),
           createdAt: new Date().toISOString(),

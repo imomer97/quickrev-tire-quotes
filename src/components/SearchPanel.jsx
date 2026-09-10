@@ -151,6 +151,7 @@ export default function SearchPanel({ tires, updateTire, deleteTire, addTire, bu
     model: '',
     size: '',
     category: 'tire',
+    fitment: '',
     wholesale: '',
     stock: '',
     season: 'All-Season',
@@ -402,6 +403,7 @@ export default function SearchPanel({ tires, updateTire, deleteTire, addTire, bu
       model: editForm.model,
       size: editForm.size.toUpperCase(),
       category: editForm.category || 'tire',
+      fitment: (editForm.fitment || '').trim() || null,
       wholesale: parseFloat(editForm.wholesale) || 0,
       stock: parseInt(editForm.stock, 10) || 0,
       season: editForm.season,
@@ -488,6 +490,7 @@ export default function SearchPanel({ tires, updateTire, deleteTire, addTire, bu
       model: newTireForm.model,
       size: newTireForm.size.toUpperCase(),
       category: newTireForm.category || 'tire',
+      fitment: (newTireForm.fitment || '').trim() || undefined,
       wholesale: parseFloat(newTireForm.wholesale) || 0,
       stock: parseInt(newTireForm.stock, 10) || 0,
       season: newTireForm.category && newTireForm.category !== 'tire' ? 'None' : (newTireForm.season || 'All-Season'),
@@ -1112,6 +1115,17 @@ ${stockText}
                 />
               </div>
               <div>
+                <label className="text-sm font-medium mb-1 block">Vehicle Fitment (optional)</label>
+                <input
+                  type="text"
+                  className="input"
+                  placeholder="e.g., 2019-2023 Escape, MiniSuv, 6-lug GM"
+                  value={newTireForm.fitment || ''}
+                  onChange={(e) => setNewTireForm(f => ({ ...f, fitment: e.target.value }))}
+                />
+                <p className="text-xs text-muted mt-1">Shown on the PDF and searchable in the Vehicle Fitment filter.</p>
+              </div>
+              <div>
                 <label className="text-sm font-medium mb-1 block">Wholesale Cost ($)</label>
                 <input
                   type="number"
@@ -1235,6 +1249,7 @@ ${stockText}
                     model: '',
                     size: '',
                     category: 'tire',
+                    fitment: '',
                     wholesale: '',
                     stock: '',
                     season: 'All-Season',
@@ -1548,6 +1563,17 @@ ${stockText}
                       value={editForm.size || ''}
                       onChange={(e) => setEditForm(f => ({ ...f, size: e.target.value }))}
                       placeholder="205/55R16"
+                    />
+                  )}
+                  {/* Fitment tag — editable inline, shown on the PDF for wheels/parts */}
+                  {!isEditing ? (
+                    tire.fitment ? <span className="badge badge-gray" title="Vehicle fitment">{tire.fitment}</span> : null
+                  ) : (
+                    <input
+                      className="input text-sm w-40"
+                      value={editForm.fitment || ''}
+                      onChange={(e) => setEditForm(f => ({ ...f, fitment: e.target.value }))}
+                      placeholder="Fitment e.g. 2019 Escape"
                     />
                   )}
                   <span className={`badge badge-${

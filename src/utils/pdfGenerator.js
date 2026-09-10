@@ -4,6 +4,7 @@ import quickrevLogo from '../assets/quickrev-logo.png?inline';
 import {
   calculateInstallationPerTire,
   parseTireSize,
+  parseWheelSize,
   formatCurrency,
   HST_RATE,
   getRegularPrice,
@@ -199,11 +200,30 @@ export function generateOptionsPDF({
       pendingSaleRows.push({ label: `${tire.brand} ${tire.model} (${tire.size})`, sale });
     }
 
+    // Size cell: for wheels, split the spec onto a second line — bolt pattern
+    // and offset are the details a customer needs to verify fitment. Parts keep
+    // their fitment note if one is set.
+    let sizeCell = tire.size;
+    const cat = tire.category || 'tire';
+    if (cat === 'wheel') {
+      const w = parseWheelSize(tire.size);
+      if (w && (w.boltPattern || w.diameter != null)) {
+        const lines = [];
+        if (w.boltPattern) lines.push(String(w.boltPattern).toUpperCase());
+        const dims = [w.diameter != null ? w.diameter : null, w.width != null ? w.width : null].filter(v => v != null);
+        if (dims.length) lines.push(dims.join('×'));
+        if (w.offset != null) lines.push(`ET${w.offset}`);
+        sizeCell = lines.join('\n');
+      }
+    } else if (cat === 'part' && tire.fitment) {
+      sizeCell = `${tire.size}\nFits: ${tire.fitment}`;
+    }
+
     const row = [
       CAT_LABEL[tire.category || 'tire'] || 'Tire',
       tire.brand,
       tire.model,
-      tire.size,
+      sizeCell,
       tire.season || '—',
       tire.stock.toString(),
       formatCurrency(tirePrice),  // effective price (sale while active, else regular)
@@ -250,7 +270,7 @@ export function generateOptionsPDF({
   const columnStyles = {
     [col.category]: { cellWidth: 18 },
     [col.brand]: { cellWidth: 16 },
-    [col.size]: { cellWidth: 22 },
+    [col.size]: { cellWidth: 26 },
     [col.season]: { cellWidth: 20 },
     [col.stock]: { cellWidth: 12 },
     [col.price]: { cellWidth: 19 },
