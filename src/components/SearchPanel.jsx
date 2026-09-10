@@ -27,6 +27,8 @@ import {
   getSaleInfo,
   getEffectiveRetail,
   resolvePostalCode,
+  TPMS_PROGRAM_FEE,
+  isTpmsItem,
 } from '../data/distributors.js';
 import { generateOptionsPDF } from '../utils/pdfGenerator.js';
 
@@ -400,8 +402,9 @@ export default function SearchPanel({ tires, updateTire, deleteTire, addTire, bu
     const hst = retailPrice * HST_RATE;
     const tireTotal = retailPrice + hst;
     const sale = getSaleInfo(tire);
+    const tpms = isTpmsItem(tire);
 
-    if (!parsed) {
+    if (!parsed && !tpms) {
       return {
         purchaseCost: calculatePurchaseCost(tire.wholesale),
         retailPrice,
@@ -416,10 +419,14 @@ export default function SearchPanel({ tires, updateTire, deleteTire, addTire, bu
       };
     }
 
-    const installEligible = showInstall && tire.includeInstall !== false;
-    const installPerTire = installEligible ? calculateInstallationPerTire(
-      parsed.width, parsed.aspect, parsed.rim, vehicleType, buyFromQuickRev
-    ) : 0;
+    const installEligible = showInstall && tire.includeInstall !== false && (tpms || parsed);
+    const installPerTire = installEligible
+      ? (tpms
+          ? TPMS_PROGRAM_FEE
+          : calculateInstallationPerTire(
+              parsed.width, parsed.aspect, parsed.rim, vehicleType, buyFromQuickRev
+            ))
+      : 0;
     // Combined pre-tax (tire at effective price + installation), HST on both
     const preTax = installEligible ? retailPrice + installPerTire : retailPrice;
     const totalHST = preTax * HST_RATE;

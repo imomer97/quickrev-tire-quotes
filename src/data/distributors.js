@@ -107,6 +107,19 @@ export const DISTRIBUTOR_BRANDS = {
 // ========== PRICING CALCULATION ==========
 
 /**
+ * TPMS sensor programming: a flat per-sensor fee, independent of the tire
+ * installation rate logic (which scales by tire size/vehicle). Detected from
+ * the item's brand/model/size naming so no special category is required.
+ */
+export const TPMS_PROGRAM_FEE = 20.00;
+
+export function isTpmsItem(item) {
+  if (!item) return false;
+  const hay = `${item.brand || ''} ${item.model || ''} ${item.size || ''}`.toUpperCase();
+  return hay.includes('TPMS');
+}
+
+/**
  * Calculate the purchase cost (wholesale + env fee)
  * This is what QuickRev pays the distributor
  */

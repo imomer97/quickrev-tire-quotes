@@ -10,6 +10,8 @@ import {
   getRegularPrice,
   getSaleInfo,
   getEffectiveRetail,
+  TPMS_PROGRAM_FEE,
+  isTpmsItem,
 } from '../data/distributors.js';
 
 /** Compact date like "Aug 15" for the sale-period column */
@@ -143,7 +145,9 @@ export function generateOptionsPDF({
   const anySale = tires.some(t => typeof t.salePrice === 'number' && t.salePrice > 0);
   const showPeriod = anySale;
   const anyInstall = tires.some(t =>
-    includeInstallation && t.includeInstall !== false && (t.category || 'tire') === 'tire' && parseTireSize(t.size)
+    includeInstallation && t.includeInstall !== false && (
+      isTpmsItem(t) || ((t.category || 'tire') === 'tire' && parseTireSize(t.size))
+    )
   );
   const showInstallCol = includeInstallation && anyInstall;
 
@@ -159,16 +163,22 @@ export function generateOptionsPDF({
     const sale = getSaleInfo(tire);
 
     // Installation applies to tires only — wheels/parts (no parseable tire size
-    // or explicit opt-out) are excluded.
-    const installEligible = includeInstallation && tire.includeInstall !== false && parsed && (tire.category || 'tire') === 'tire';
+    // or explicit opt-out) are excluded. TPMS sensors are the exception: they
+    // carry a flat per-sensor programming fee instead of the size-based rate.
+    const tpms = isTpmsItem(tire);
+    const installEligible = includeInstallation && tire.includeInstall !== false && (
+      tpms || (parsed && (tire.category || 'tire') === 'tire')
+    );
     let installPerTire = 0;
     let totalHST;
     let grandTotal;
 
     if (installEligible) {
-      installPerTire = calculateInstallationPerTire(
-        parsed.width, parsed.aspect, parsed.rim, vehicleType, buyFromQuickRev
-      );
+      installPerTire = tpms
+        ? TPMS_PROGRAM_FEE
+        : calculateInstallationPerTire(
+            parsed.width, parsed.aspect, parsed.rim, vehicleType, buyFromQuickRev
+          );
       // Installation applies only to the number of tires to be installed (installQty)
       const installTotal = installPerTire * installQty;
       const preTax = tirePrice * quantity + installTotal;
@@ -229,7 +239,7 @@ export function generateOptionsPDF({
       formatCurrency(tirePrice),  // effective price (sale while active, else regular)
     ];
     if (showPeriod) row.push(salePeriod);               // e.g. "Aug 1 – 15" or "until Aug 15"
-    if (showInstallCol) row.push(installPerTire > 0 ? formatCurrency(installPerTire) : '—');  // Installation only (per tire)
+    if (showInstallCol) row.push(installPerTire > 0 ? formatCurrency(installPerTire) : '—');  // Installation / programming (per item)
     row.push(formatCurrency(totalHST), formatCurrency(grandTotal));
     return { cells: row, price: tirePrice, isFree: !!tire.isFree };
   });
@@ -367,6 +377,11 @@ export function generateOptionsPDF({
       }
     } else {
       notes.push(`• Installation not included — ask for installation rates`);
+    }
+
+    // TPMS sensors: flat per-sensor programming fee (different from tire install rates)
+    if (tires.some(isTpmsItem)) {
+      notes.push(`• TPMS sensor programming: ${formatCurrency(TPMS_PROGRAM_FEE)} per sensor (flat rate)`);
     }
 
     // Sale notes — active sales (with period + regular price) and pending sales
