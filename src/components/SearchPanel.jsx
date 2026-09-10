@@ -17,6 +17,7 @@ import {
   calculateInstallationPerTire,
   parseTireSize,
   parseWheelSize,
+  formatSize,
   formatCurrency,
   ENV_FEE_PER_TIRE,
   MARKUP_PER_TIRE,

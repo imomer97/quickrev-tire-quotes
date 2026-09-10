@@ -111,7 +111,8 @@ export const DISTRIBUTOR_BRANDS = {
  * This is what QuickRev pays the distributor
  */
 export function calculatePurchaseCost(wholesale) {
-  return wholesale + ENV_FEE_PER_TIRE;
+  const w = parseFloat(wholesale) || 0;
+  return w + ENV_FEE_PER_TIRE;
 }
 
 /**
@@ -282,7 +283,8 @@ export function getTierForBrand(distributorId, brand) {
  * Format currency
  */
 export function formatCurrency(value) {
-  return `$${value.toFixed(2)}`;
+  const n = typeof value === 'number' ? value : parseFloat(value);
+  return `$${(Number.isFinite(n) ? n : 0).toFixed(2)}`;
 }
 
 /**
@@ -316,7 +318,8 @@ export function formatSize(sizeStr, item) {
  */
 export function getRegularPrice(tire) {
   if (tire && tire.isFree) return 0;
-  if (typeof tire.price === 'number' && tire.price > 0) return tire.price;
+  const priceOverride = parseFloat(tire.price);
+  if (Number.isFinite(priceOverride) && priceOverride > 0) return priceOverride;
   return calculateRetailPrice(tire.wholesale);
 }
 
