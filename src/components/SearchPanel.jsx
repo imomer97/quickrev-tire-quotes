@@ -75,6 +75,8 @@ export default function SearchPanel({ tires, updateTire, deleteTire, addTire, bu
   const [inStockOnly, setInStockOnly] = useState(false);
   // Wheel bolt-pattern chips (e.g. "6X132 74.5MM", "5X114.3", "SPLINE DEEP")
   const [activeBoltPatterns, setActiveBoltPatterns] = useState(new Set());
+  // Wheel diameter filter (e.g. "17", "20") in inches
+  const [activeDiameters, setActiveDiameters] = useState(new Set());
   const [showBoltPatternInput, setShowBoltPatternInput] = useState(false);
   const [boltPatternInput, setBoltPatternInput] = useState('');
   // Free-text fitment tags (e.g. "2019 Escape", "MiniSuv", "M14X1.5")
@@ -209,6 +211,15 @@ export default function SearchPanel({ tires, updateTire, deleteTire, addTire, bu
     });
   };
 
+  const toggleDiameter = (d) => {
+    setActiveDiameters(prev => {
+      const next = new Set(prev);
+      if (next.has(d)) next.delete(d);
+      else next.add(d);
+      return next;
+    });
+  };
+
   const toggleFitment = (f) => {
     setActiveFitments(prev => {
       const next = new Set(prev);
@@ -243,6 +254,16 @@ export default function SearchPanel({ tires, updateTire, deleteTire, addTire, bu
   // fresh without scanning the full catalog on every render.
   const boltPatterns = useMemo(
     () => [...new Set(tires.filter(t => getCategory(t) === 'wheel').map(t => (t.size || '').toUpperCase()).filter(Boolean))].sort(),
+    [tires]
+  );
+  // Distinct wheel diameters (inches), sorted numerically
+  const wheelDiameters = useMemo(
+    () => [...new Set(
+      tires.filter(t => getCategory(t) === 'wheel')
+        .map(t => parseWheelSize(t.size))
+        .filter(w => w && w.diameter != null)
+        .map(w => w.diameter)
+    )].sort((a, b) => a - b),
     [tires]
   );
   const fitments = useMemo(
@@ -297,6 +318,12 @@ export default function SearchPanel({ tires, updateTire, deleteTire, addTire, bu
         const hit = [...activeBoltPatterns].some(bp => tBp.includes(bp));
         if (!hit) return false;
       }
+      // Wheel diameter filter — parse the wheel size and match its diameter in
+      // inches. Only applies to wheels, so tire results are never hidden.
+      if (getCategory(tire) === 'wheel' && activeDiameters.size > 0) {
+        const w = parseWheelSize(tire.size);
+        if (!w || w.diameter == null || !activeDiameters.has(w.diameter)) return false;
+      }
       // Vehicle fitment filter — free-text, matches against size, brand, model,
       // and a dedicated fitment string if the item carries one.
       if (activeFitments.size > 0) {
@@ -338,7 +365,7 @@ export default function SearchPanel({ tires, updateTire, deleteTire, addTire, bu
     });
 
     return results;
-  }, [tires, searchSize, activeDistributors, activeTiers, activeSeasons, activeCategories, activeBoltPatterns, activeFitments, inStockOnly, minStock, sortBy, showInstall, vehicleType, buyFromQuickRev, getTireStock, getEffectiveRetail]);
+  }, [tires, searchSize, activeDistributors, activeTiers, activeSeasons, activeCategories, activeBoltPatterns, activeDiameters, activeFitments, inStockOnly, minStock, sortBy, showInstall, vehicleType, buyFromQuickRev, getTireStock, getEffectiveRetail]);
 
   function getTireCalculations(tire) {
     const parsed = parseTireSize(tire.size) || parseWheelSize(tire.size);
@@ -816,6 +843,29 @@ ${stockText}
                   <span className="text-xs text-muted">No wheels in the catalog yet — add wheels to see their bolt patterns here.</span>
                 )}
               </div>
+              {wheelDiameters.length > 0 && (
+                <div className="mt-2">
+                  <p className="text-xs font-semibold text-muted mb-2 uppercase">Diameter (inches)</p>
+                  <div className="flex flex-wrap gap-2">
+                    {wheelDiameters.map(d => (
+                      <button
+                        key={d}
+                        type="button"
+                        onClick={() => toggleDiameter(d)}
+                        style={{
+                          padding: '2px 10px', fontSize: '0.75rem', borderRadius: 6,
+                          border: '1px solid ' + (activeDiameters.has(d) ? '#0f172a' : '#cbd5e1'),
+                          background: activeDiameters.has(d) ? '#0f172a' : '#fff',
+                          color: activeDiameters.has(d) ? '#fff' : '#334155',
+                          fontFamily: 'monospace', cursor: 'pointer',
+                        }}
+                      >
+                        {d}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
 
             <div>
@@ -853,7 +903,7 @@ ${stockText}
                   <button
                     type="button"
                     className="text-xs text-danger font-medium"
-                    onClick={() => { setActiveBoltPatterns(new Set()); setActiveFitments(new Set()); }}
+                    onClick={() => { setActiveBoltPatterns(new Set()); setActiveDiameters(new Set()); setActiveFitments(new Set()); }}
                   >
                     Clear fitment filters
                   </button>
