@@ -9,9 +9,14 @@ import {
   SEASONS,
   TIERS,
   VEHICLE_LABELS,
+  CATEGORIES,
+  CATEGORY_KEYS,
+  getCategory,
+  isSeasonApplicable,
   calculatePurchaseCost,
   calculateInstallationPerTire,
   parseTireSize,
+  parseWheelSize,
   formatCurrency,
   ENV_FEE_PER_TIRE,
   MARKUP_PER_TIRE,
@@ -61,6 +66,21 @@ export default function SearchPanel({ tires, updateTire, deleteTire, addTire, bu
   }, [singleActiveLocation]);
   const [activeTiers, setActiveTiers] = useState(new Set(Object.keys(TIERS)));
   const [activeSeasons, setActiveSeasons] = useState(new Set(SEASONS));
+  // Category filter: all categories shown by default
+  const [activeCategories, setActiveCategories] = useState(new Set(CATEGORY_KEYS));
+  // Show only items with stock ≥ this many; defaults to the quote quantity so
+  // out-of-stock-for-this-job items stay hidden automatically.
+  const [minStock, setMinStock] = useState(quantity);
+  // Hide out-of-stock items ("In stock only").
+  const [inStockOnly, setInStockOnly] = useState(false);
+  // Wheel bolt-pattern chips (e.g. "6X132 74.5MM", "5X114.3", "SPLINE DEEP")
+  const [activeBoltPatterns, setActiveBoltPatterns] = useState(new Set());
+  const [showBoltPatternInput, setShowBoltPatternInput] = useState(false);
+  const [boltPatternInput, setBoltPatternInput] = useState('');
+  // Free-text fitment tags (e.g. "2019 Escape", "MiniSuv", "M14X1.5")
+  const [activeFitments, setActiveFitments] = useState(new Set());
+  const [showFitmentInput, setShowFitmentInput] = useState(false);
+  const [fitmentInput, setFitmentInput] = useState('');
   const [sortBy, setSortBy] = useState('price-asc');
   const [showInstall, setShowInstall] = useState(true);
   const [vehicleType, setVehicleType] = useState('');
@@ -114,6 +134,7 @@ export default function SearchPanel({ tires, updateTire, deleteTire, addTire, bu
     adjustMode: 'increase',
     adjustBy: '',
     adjustUnit: '$',
+    category: '',
     season: '',
     salePrice: '',
     saleStart: '',
@@ -129,6 +150,7 @@ export default function SearchPanel({ tires, updateTire, deleteTire, addTire, bu
     brand: '',
     model: '',
     size: '',
+    category: 'tire',
     wholesale: '',
     stock: '',
     season: 'All-Season',
@@ -168,6 +190,33 @@ export default function SearchPanel({ tires, updateTire, deleteTire, addTire, bu
     });
   };
 
+  const toggleCategory = (cat) => {
+    setActiveCategories(prev => {
+      const next = new Set(prev);
+      if (next.has(cat)) next.delete(cat);
+      else next.add(cat);
+      return next;
+    });
+  };
+
+  const toggleBoltPattern = (bp) => {
+    setActiveBoltPatterns(prev => {
+      const next = new Set(prev);
+      if (next.has(bp)) next.delete(bp);
+      else next.add(bp);
+      return next;
+    });
+  };
+
+  const toggleFitment = (f) => {
+    setActiveFitments(prev => {
+      const next = new Set(prev);
+      if (next.has(f)) next.delete(f);
+      else next.add(f);
+      return next;
+    });
+  };
+
   // === NORMALIZE TIRE SIZE FOR SEARCHING ===
   // Convert all tire formats to normalized forms for matching:
   //   "205/55R16"  → alphanumeric "20555r16" + numeric "2055516"
@@ -187,6 +236,18 @@ export default function SearchPanel({ tires, updateTire, deleteTire, addTire, bu
 
   // Price / sale helpers (getRegularPrice, getSaleInfo, getEffectiveRetail) are
   // shared from ../data/distributors.js so the PDF generator stays in sync.
+
+  // Distinct bolt-patterns and fitment tags across the current catalog, for the
+  // filter chips. These update when the catalog changes so the chip list stays
+  // fresh without scanning the full catalog on every render.
+  const boltPatterns = useMemo(
+    () => [...new Set(tires.filter(t => getCategory(t) === 'wheel').map(t => (t.size || '').toUpperCase()).filter(Boolean))].sort(),
+    [tires]
+  );
+  const fitments = useMemo(
+    () => [...new Set(tires.map(t => t.fitment || '').filter(Boolean).sort())],
+    [tires]
+  );
 
   // === FILTER & SORT LOGIC ===
   const filteredTires = useMemo(() => {
@@ -224,15 +285,37 @@ export default function SearchPanel({ tires, updateTire, deleteTire, addTire, bu
       if (!distMatch) return false;
       // Tier
       if (!activeTiers.has(tire.tier)) return false;
-      // Season
-      if (!activeSeasons.has(tire.season)) return false;
+      // Season — only tires carry a season; wheels/parts skip this filter
+      if (isSeasonApplicable(tire) && !activeSeasons.has(tire.season)) return false;
+      // Category
+      if (!activeCategories.has(getCategory(tire))) return false;
+      // Wheel bolt-pattern filter (only meaningful for wheels; for tires it's a
+      // no-op so tire results aren't hidden).
+      if (getCategory(tire) === 'wheel' && activeBoltPatterns.size > 0) {
+        const tBp = String(tire.size || '').toUpperCase();
+        const hit = [...activeBoltPatterns].some(bp => tBp.includes(bp));
+        if (!hit) return false;
+      }
+      // Vehicle fitment filter — free-text, matches against size, brand, model,
+      // and a dedicated fitment string if the item carries one.
+      if (activeFitments.size > 0) {
+        const haystack = [tire.size, tire.brand, tire.model, tire.fitment || '']
+          .join(' ').toLowerCase();
+        const hit = [...activeFitments].some(f => haystack.includes(f.toLowerCase()));
+        if (!hit) return false;
+      }
+      // Availability: skip out-of-stock when the user asked for it, and skip items
+      // whose stock is below the minimum the quote requires (so e.g. a 4-tire job
+      // won't show a wheel with only 2 in stock).
+      if (inStockOnly && getTireStock(tire) === 0) return false;
+      if (getTireStock(tire) < minStock) return false;
       return true;
     });
 
     // Sort (pre-tax total based on the effective price, so sales affect order)
     results = [...results].sort((a, b) => {
-      const aParsed = parseTireSize(a.size);
-      const bParsed = parseTireSize(b.size);
+      const aParsed = parseTireSize(a.size) || parseWheelSize(a.size);
+      const bParsed = parseTireSize(b.size) || parseWheelSize(b.size);
       const aRetail = getEffectiveRetail(a);
       const bRetail = getEffectiveRetail(b);
       const aInstall = showInstall && a.includeInstall !== false && aParsed
@@ -254,10 +337,10 @@ export default function SearchPanel({ tires, updateTire, deleteTire, addTire, bu
     });
 
     return results;
-  }, [tires, searchSize, activeDistributors, activeTiers, activeSeasons, sortBy, showInstall, vehicleType, buyFromQuickRev, getTireStock, getEffectiveRetail]);
+  }, [tires, searchSize, activeDistributors, activeTiers, activeSeasons, activeCategories, activeBoltPatterns, activeFitments, inStockOnly, minStock, sortBy, showInstall, vehicleType, buyFromQuickRev, getTireStock, getEffectiveRetail]);
 
   function getTireCalculations(tire) {
-    const parsed = parseTireSize(tire.size);
+    const parsed = parseTireSize(tire.size) || parseWheelSize(tire.size);
     const retailPrice = getEffectiveRetail(tire);
     const hst = retailPrice * HST_RATE;
     const tireTotal = retailPrice + hst;
@@ -318,6 +401,7 @@ export default function SearchPanel({ tires, updateTire, deleteTire, addTire, bu
       brand: editForm.brand,
       model: editForm.model,
       size: editForm.size.toUpperCase(),
+      category: editForm.category || 'tire',
       wholesale: parseFloat(editForm.wholesale) || 0,
       stock: parseInt(editForm.stock, 10) || 0,
       season: editForm.season,
@@ -376,6 +460,7 @@ export default function SearchPanel({ tires, updateTire, deleteTire, addTire, bu
     }
     if (bulkForm.includeInstall !== '') updates.includeInstall = bulkForm.includeInstall === 'true';
     if (bulkForm.isFree !== '') updates.isFree = bulkForm.isFree === 'true';
+    if (bulkForm.category) updates.category = bulkForm.category;
     // Increase / decrease the price (regular, pre-tax) by an amount or percentage
     if (bulkForm.adjustBy !== '') {
       const amt = parseFloat(bulkForm.adjustBy) || 0;
@@ -383,12 +468,12 @@ export default function SearchPanel({ tires, updateTire, deleteTire, addTire, bu
     }
     if (Object.keys(updates).length === 0) return;
     bulkUpdateTires(ids, updates);
-    setBulkMsg(`Applied to ${ids.length} tire(s)`);
+    setBulkMsg(`Applied to ${ids.length} item(s)`);
     setTimeout(() => setBulkMsg(null), 2500);
     setBulkForm({
       distributorId: '', stock: '', price: '', adjustMode: 'increase', adjustBy: '', adjustUnit: '$',
       season: '', salePrice: '', saleStart: '', saleEnd: '', clearSale: false,
-      includeInstall: '', isFree: '',
+      includeInstall: '', isFree: '', category: '',
     });
   };
 
@@ -402,9 +487,10 @@ export default function SearchPanel({ tires, updateTire, deleteTire, addTire, bu
       brand: newTireForm.brand,
       model: newTireForm.model,
       size: newTireForm.size.toUpperCase(),
+      category: newTireForm.category || 'tire',
       wholesale: parseFloat(newTireForm.wholesale) || 0,
       stock: parseInt(newTireForm.stock, 10) || 0,
-      season: newTireForm.season || 'All-Season',
+      season: newTireForm.category && newTireForm.category !== 'tire' ? 'None' : (newTireForm.season || 'All-Season'),
       distributorId: newTireForm.distributorId,
       includeInstall: newTireForm.includeInstall !== false,
       isFree: !!newTireForm.isFree,
@@ -587,22 +673,22 @@ ${stockText}
             <button 
               className="btn btn-success"
               onClick={() => setShowAddModal(true)}
-              title="Add a new tire manually"
+              title="Add a new item manually (tire, wheel, or part)"
             >
               <Plus className="w-4 h-4" />
-              Add Tire
+              Add Item
             </button>
           </div>
 
           {/* === SEARCH HELP TEXT === */}
           <p className="text-xs text-muted ml-1">
-            💡 Search by size (205/55R16, 20555R16, or 2055516), brand, or model. Results update as you type.
+            💡 Search by size (205/55R16, 20555R16, or 2055516), brand, or model. Filter by wheel bolt pattern and vehicle fitment, stock, and category below.
           </p>
 
           {/* === PDF SIZE FIELD === */}
           <div className="flex gap-3 flex-wrap items-end">
             <div>
-              <label className="text-xs font-semibold text-muted mb-1 block uppercase">New Tire Size (PDF)</label>
+              <label className="text-xs font-semibold text-muted mb-1 block uppercase">Item Size (PDF)</label>
               <input
                 type="text"
                 className="input w-44 font-mono"
@@ -618,6 +704,38 @@ ${stockText}
 
           {/* === FILTER TOGGLES === */}
           <div className="flex flex-col gap-3">
+            {/* Availability filter — hides out-of-stock items and those short of the
+                minimum the quote requires. */}
+            <div>
+              <div className="flex items-center gap-2 mb-2">
+                <p className="text-xs font-semibold text-muted uppercase">Availability</p>
+              </div>
+              <div className="flex flex-wrap gap-3 items-center">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={inStockOnly}
+                    onChange={(e) => setInStockOnly(e.target.checked)}
+                    className="rounded"
+                  />
+                  <span className="text-sm">In stock only</span>
+                </label>
+                <div>
+                  <label className="text-xs font-medium text-muted" htmlFor="minStock">Min. stock (for quote)</label>
+                  <input
+                    type="number"
+                    id="minStock"
+                    className="input w-20"
+                    placeholder="Qty"
+                    min="0"
+                    max="20"
+                    value={minStock}
+                    onChange={(e) => setMinStock(Math.max(0, parseInt(e.target.value) || 0))}
+                  />
+                </div>
+              </div>
+            </div>
+
             <div>
               <p className="text-xs font-semibold text-muted mb-2 uppercase">Distributors</p>
               <div className="flex flex-wrap gap-2">
@@ -652,6 +770,91 @@ ${stockText}
                     <span className="text-sm">{label}</span>
                   </label>
                 ))}
+              </div>
+            </div>
+
+            <div>
+              <p className="text-xs font-semibold text-muted mb-2 uppercase">Category</p>
+              <div className="flex flex-wrap gap-2">
+                {Object.entries(CATEGORIES).map(([key, label]) => (
+                  <label key={key} className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={activeCategories.has(key)}
+                      onChange={() => toggleCategory(key)}
+                      className="rounded"
+                    />
+                    <span className="text-sm">{label}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+
+            <div>
+              <p className="text-xs font-semibold text-muted mb-2 uppercase">Wheel Bolt Pattern</p>
+              <div className="flex flex-wrap gap-2">
+                {boltPatterns.map(bp => (
+                  <button
+                    key={bp}
+                    type="button"
+                    onClick={() => toggleBoltPattern(bp)}
+                    style={{
+                      padding: '2px 10px', fontSize: '0.75rem', borderRadius: 6,
+                      border: '1px solid ' + (activeBoltPatterns.has(bp) ? '#0f172a' : '#cbd5e1'),
+                      background: activeBoltPatterns.has(bp) ? '#0f172a' : '#fff',
+                      color: activeBoltPatterns.has(bp) ? '#fff' : '#334155',
+                      fontFamily: 'monospace', cursor: 'pointer',
+                    }}
+                  >
+                    {bp}
+                  </button>
+                ))}
+                {boltPatterns.length === 0 && (
+                  <span className="text-xs text-muted">No wheels in the catalog yet — add wheels to see their bolt patterns here.</span>
+                )}
+              </div>
+            </div>
+
+            <div>
+              <p className="text-xs font-semibold text-muted mb-2 uppercase">Vehicle Fitment</p>
+              <div className="flex flex-wrap gap-2 items-center">
+                {fitments.map(f => (
+                  <button
+                    key={f}
+                    type="button"
+                    onClick={() => toggleFitment(f)}
+                    style={{
+                      padding: '2px 10px', fontSize: '0.75rem', borderRadius: 6,
+                      border: '1px solid ' + (activeFitments.has(f) ? '#3b82f6' : '#cbd5e1'),
+                      background: activeFitments.has(f) ? '#3b82f6' : '#fff',
+                      color: activeFitments.has(f) ? '#fff' : '#334155',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    {f}
+                  </button>
+                ))}
+                <input
+                  className="input text-xs w-44"
+                  placeholder="Fitment e.g. 2019 Escape — Enter"
+                  value={fitmentInput}
+                  onChange={(e) => setFitmentInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && fitmentInput.trim()) {
+                      toggleFitment(fitmentInput.trim());
+                      setFitmentInput('');
+                    }
+                  }}
+                />
+                {(activeBoltPatterns.size > 0 || activeFitments.size > 0) && (
+                  <button
+                    type="button"
+                    className="text-xs text-danger font-medium"
+                    onClick={() => { setActiveBoltPatterns(new Set()); setActiveFitments(new Set()); }}
+                  >
+                    Clear fitment filters
+                  </button>
+                )}
               </div>
             </div>
 
@@ -856,7 +1059,7 @@ ${stockText}
       {showAddModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-lg p-6 max-w-md w-full">
-            <h2 className="text-lg font-bold mb-4">Add Tire</h2>
+            <h2 className="text-lg font-bold mb-4">Add Item</h2>
             <div className="flex-col gap-3 mb-4">
               <div>
                 <label className="text-sm font-medium mb-1 block">Brand *</label>
@@ -879,11 +1082,31 @@ ${stockText}
                 />
               </div>
               <div>
-                <label className="text-sm font-medium mb-1 block">Size (e.g., 205/55R16) *</label>
+                <label className="text-sm font-medium mb-1 block">Category *</label>
+                <select
+                  className="input select"
+                  value={newTireForm.category || 'tire'}
+                  onChange={(e) => {
+                    const cat = e.target.value;
+                    setNewTireForm(f => ({
+                      ...f,
+                      category: cat,
+                      // Non-tire items have no season and default install off
+                      ...(cat !== 'tire' ? { season: 'None', includeInstall: false } : { season: 'All-Season' }),
+                    }));
+                  }}
+                >
+                  {Object.entries(CATEGORIES).map(([k, label]) => <option key={k} value={k}>{label}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="text-sm font-medium mb-1 block">
+                  {newTireForm.category === 'wheel' ? 'Size (e.g., 22X9.5 6X132 74.5MM)' : newTireForm.category === 'part' ? 'Part / Fitment (e.g., M14X1.5, 2019 Escape)' : 'Size (e.g., 205/55R16)'} *
+                </label>
                 <input
                   type="text"
                   className="input font-mono"
-                  placeholder="205/55R16"
+                  placeholder={newTireForm.category === 'wheel' ? '22X9.5 6X132' : newTireForm.category === 'part' ? 'Part number or fitment' : '205/55R16'}
                   value={newTireForm.size}
                   onChange={(e) => setNewTireForm(f => ({ ...f, size: e.target.value }))}
                 />
@@ -909,6 +1132,7 @@ ${stockText}
                   onChange={(e) => setNewTireForm(f => ({ ...f, stock: e.target.value }))}
                 />
               </div>
+              {(newTireForm.category || 'tire') === 'tire' && (
               <div>
                 <label className="text-sm font-medium mb-1 block">Season</label>
                 <select
@@ -923,6 +1147,7 @@ ${stockText}
                 </select>
                 <p className="text-xs text-muted mt-1">Select "None" for wheels, rims, TPMS sensors, and accessories.</p>
               </div>
+              )}
               <div className="flex gap-4">
                 <label className="flex items-center gap-2 cursor-pointer">
                   <input
@@ -972,27 +1197,29 @@ ${stockText}
                   />
                 </div>
               </div>
-              <div>
-                <label className="text-sm font-medium mb-1 block">Distributor</label>
-                <select
-                  className="input select"
-                  value={newTireForm.distributorId}
-                  onChange={(e) => {
-                    if (e.target.value === '__new__') {
-                      const name = window.prompt('New distributor name:');
-                      if (name && name.trim()) {
-                        const id = onAddDistributor(name.trim());
-                        if (id) setNewTireForm(f => ({ ...f, distributorId: id }));
+              {((newTireForm.category || 'tire') === 'tire') && (
+                <div>
+                  <label className="text-sm font-medium mb-1 block">Distributor</label>
+                  <select
+                    className="input select"
+                    value={newTireForm.distributorId}
+                    onChange={(e) => {
+                      if (e.target.value === '__new__') {
+                        const name = window.prompt('New distributor name:');
+                        if (name && name.trim()) {
+                          const id = onAddDistributor(name.trim());
+                          if (id) setNewTireForm(f => ({ ...f, distributorId: id }));
+                        }
+                      } else {
+                        setNewTireForm(f => ({ ...f, distributorId: e.target.value }));
                       }
-                    } else {
-                      setNewTireForm(f => ({ ...f, distributorId: e.target.value }));
-                    }
-                  }}
-                >
-                  {distributors.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
-                  <option value="__new__">+ New distributor…</option>
-                </select>
-              </div>
+                    }}
+                  >
+                    {distributors.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
+                    <option value="__new__">+ New distributor…</option>
+                  </select>
+                </div>
+              )}
             </div>
             <div className="flex gap-2">
               <button className="btn btn-success flex-1" onClick={handleAddTire}>
@@ -1007,6 +1234,7 @@ ${stockText}
                     brand: '',
                     model: '',
                     size: '',
+                    category: 'tire',
                     wholesale: '',
                     stock: '',
                     season: 'All-Season',
@@ -1062,7 +1290,7 @@ ${stockText}
       {showBulkEdit && selectedIds.size > 0 && (
         <div className="card p-4 mb-4">
           <div className="flex items-center justify-between mb-3">
-            <h3 className="font-semibold text-sm">Bulk Edit — {selectedIds.size} selected</h3>
+            <h3 className="font-semibold text-sm">Bulk Edit — {selectedIds.size} item(s) selected</h3>
             {bulkMsg && <span className="text-xs text-success">{bulkMsg}</span>}
           </div>
           <div className="flex flex-wrap gap-3 items-end">
@@ -1075,6 +1303,17 @@ ${stockText}
               >
                 <option value="">— Leave unchanged —</option>
                 {distributors.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="text-xs font-semibold text-muted mb-1 block uppercase">Category</label>
+              <select
+                className="input select w-32"
+                value={bulkForm.category}
+                onChange={(e) => setBulkForm(f => ({ ...f, category: e.target.value }))}
+              >
+                <option value="">— Leave unchanged —</option>
+                {Object.entries(CATEGORIES).map(([k, label]) => <option key={k} value={k}>{label}</option>)}
               </select>
             </div>
             <div>
@@ -1296,8 +1535,13 @@ ${stockText}
 
                 {/* Size & Badges */}
                 <div className="flex items-center gap-2 mb-3 flex-wrap">
+                  {/* Category badge — leads the row so the customer can scan tires vs.
+                      wheels/rims vs. parts at a glance. Absent/legacy items render as "Tire". */}
+                  <span className={`badge badge-category-${getCategory(tire)}`}>
+                    {CATEGORIES[getCategory(tire)]}
+                  </span>
                   {!isEditing ? (
-                    <span className="badge badge-gray font-mono">{tire.size}</span>
+                    <span className="badge badge-gray font-mono">{formatSize(tire.size, tire)}</span>
                   ) : (
                     <input
                       className="input text-sm w-32 font-mono"
@@ -1529,7 +1773,14 @@ ${stockText}
                     <span className="text-sm font-bold font-mono">{formatCurrency(grandTotal)}</span>
                   </div>
                   <div className="flex justify-between items-center mt-1">
-                    <span className="text-xs opacity-60">{singleActiveLocation ? `Stock @ ${singleActiveLocation}: ${getTireStock(tire)}` : `Stock: ${getTireStock(tire)}`}</span>
+                    <span className="text-xs">
+                      {singleActiveLocation
+                        ? `Avail @ ${singleActiveLocation}: ${getTireStock(tire)}`
+                        : `Avail: ${getTireStock(tire)}`}
+                      {' '}<span className={`badge ${getTireStock(tire) === 0 ? 'badge-outofstock' : 'badge-available'}`} style={{padding:'0 0.375rem'}}>
+                        {getTireStock(tire) === 0 ? 'Out of stock' : 'In stock'}
+                      </span>
+                    </span>
                     <span className="text-xs opacity-60">Tires: {formatCurrency(tiresSubtotal)}{showInstall && installTotal > 0 ? ` + Install: ${formatCurrency(installTaxInclusive)}` : ''}{showInstall && travelSurcharge > 0 ? ` + Travel: ${formatCurrency(travelSurcharge)}` : ''}</span>
                   </div>
                   {/* Expandable per-warehouse stock breakdown */}

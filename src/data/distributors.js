@@ -51,6 +51,28 @@ export const VEHICLE_LABELS = {
 // ========== SEASONS ==========
 export const SEASONS = ['All-Season', 'Winter', 'All-Weather', 'All-Terrain', 'None'];
 
+// ========== PRODUCT CATEGORIES ==========
+// The app handles tires, wheels/rims (steel & alloy), and general auto parts.
+// Non-tire items carry category 'wheel' or 'part'; tires default to 'tire'
+// (legacy items with no category are treated as tires).
+export const CATEGORIES = {
+  tire: 'Tires',
+  wheel: 'Wheels / Rims',
+  part: 'Auto Parts',
+};
+
+export const CATEGORY_KEYS = Object.keys(CATEGORIES);
+
+/** Category of an item; unknown/legacy items are tires */
+export function getCategory(item) {
+  return item && CATEGORIES[item.category] ? item.category : 'tire';
+}
+
+/** Non-tire items never carry a season — the filter should skip them entirely */
+export function isSeasonApplicable(item) {
+  return getCategory(item) === 'tire';
+}
+
 // ========== DISTRIBUTORS ==========
 export const DISTRIBUTORS = [
   { id: 'canadaTire', name: 'Canada Tire', hasApi: true },
@@ -212,6 +234,22 @@ export function calculateTotalWithTax(wholesale, width, aspect, rim, vehicleType
 }
 
 /**
+ * Parse a wheel/rim size string into components.
+ * Accepts common formats: "22X9.5 40 6X132 74.5MM", "17x7.5 ET42", "18x8".
+ * Returns { diameter, width, offset, boltPattern } (missing values undefined).
+ */
+export function parseWheelSize(sizeStr) {
+  if (!sizeStr) return null;
+  const s = String(sizeStr).toLowerCase().replace(/mm/g, ' ');
+  const diameter = parseFloat((s.match(/(\d{1,2}(?:\.\d+)?)\s*[x×-]\s*\d/) || [])[1]);
+  const width = parseFloat((s.match(/\d\s*[x×-]\s*(\d{1,2}(?:\.\d+)?)/) || [])[1]);
+  const offset = parseInt((s.match(/(?:et|off(?:set)?)\s*[-+]?\s*(\d{1,3})/) || [])[1], 10);
+  const bolt = (s.match(/(\d\s*[x×]\s*\d{2,3}(?:\.\d+)?)/) || [])[1];
+  if (!diameter && !width && !offset && !bolt) return null;
+  return { diameter, width, offset, boltPattern: bolt };
+}
+
+/**
  * Parse tire size string into components.
  * Accepts all common formats: "205/55R16", "20555R16", "2055516",
  * "2,355,019" (comma-separated digits), "2355019".
@@ -248,10 +286,26 @@ export function formatCurrency(value) {
 }
 
 /**
- * Format tire size for display
+ * Format a product's size string for display.
+ * Tires are shown in standard tire notation;
+ * wheels parse their spec so pages can render "22x9.5 6x132 74.5mm" etc.
+ * Parts/fallbacks are shown as-is, upper-cased.
  */
-export function formatSize(sizeStr) {
-  return sizeStr.toUpperCase();
+export function formatSize(sizeStr, item) {
+  const cat = getCategory(item);
+  if (cat === 'wheel') {
+    const w = parseWheelSize(sizeStr);
+    if (!w) return sizeStr.toUpperCase();
+    const parts = [];
+    // Diameter x width first (most visible)
+    if (w.diameter != null && w.width != null) parts.push(`${w.diameter}×${w.width}`);
+    else if (w.diameter != null) parts.push(String(w.diameter));
+    else if (w.width != null) parts.push(String(w.width));
+    if (w.offset != null) parts.push(`ET${w.offset}`);
+    if (w.boltPattern) parts.push(w.boltPattern);
+    return parts.join(' ').toUpperCase();
+  }
+  return sizeStr ? sizeStr.toUpperCase() : '';
 }
 
 // ========== SALE PRICING ==========

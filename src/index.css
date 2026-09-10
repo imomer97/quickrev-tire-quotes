@@ -304,6 +304,15 @@ body {
 .badge-purple { background: #f3e8ff; color: #7c3aed; }
 .badge-gray { background: #f1f5f9; color: #475569; }
 
+/* Category badges — colour-coded so the customer can scan tires / wheels / parts */
+.badge-category-tire { background: #e0e7ff; color: #4338ca; }
+.badge-category-wheel { background: #dbeafe; color: #1d4ed8; }
+.badge-category-part  { background: #ffedd5; color: #c2410c; }
+
+/* Availability badges (per-warehouse stock) */
+.badge-available { background: #d1fae5; color: #065f46; }
+.badge-outofstock { background: #fee2e2; color: #991b1b; }
+
 /* Toggle switch */
 .toggle-track {
   width: 44px;

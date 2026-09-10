@@ -66,7 +66,7 @@ export function generateOptionsPDF({
   doc.setTextColor(15, 23, 42);
   doc.setFontSize(10);
   doc.setFont('helvetica', 'normal');
-  doc.text('Tire Options & Estimated Costs', margin, 26);
+  doc.text('Product Options & Estimated Costs', margin, 26);
   doc.text('quickrev.ca', pageWidth - margin, 26, { align: 'right' });
 
   doc.setDrawColor(226, 232, 240);
@@ -84,23 +84,32 @@ export function generateOptionsPDF({
   doc.text(customerName || '_________________________', margin + 30, y);
   y += 6;
 
-  // New tires with the number of tires to be installed shown beside them
-  doc.setFontSize(10);
-  doc.setFont('helvetica', 'bold');
-  doc.text('New Tires:', margin, y);
-  doc.setFont('helvetica', 'normal');
-  doc.text(tireSize || '_________________________', margin + 24, y);
-  doc.setFont('helvetica', 'bold');
-  doc.text('Tires to be Installed:', 115, y);
-  doc.setFont('helvetica', 'normal');
-  doc.text(`${installQty}`, 115 + 44, y);
+  // Item size + installation count — only shown when relevant.
+  const anyInstallRow = tires.some(
+    t => includeInstallation && t.includeInstall !== false && (t.category || 'tire') === 'tire' && parseTireSize(t.size)
+  );
+  if (tireSize) {
+    doc.setFontSize(10);
+    doc.setFont('helvetica', 'bold');
+    doc.text('Item:', margin, y);
+    doc.setFont('helvetica', 'normal');
+    doc.text(tireSize, margin + 24, y);
+    y += 6;
+  }
+  if (anyInstallRow) {
+    doc.setFontSize(10);
+    doc.setFont('helvetica', 'bold');
+    doc.text('Qty to Install:', 115, y);
+    doc.setFont('helvetica', 'normal');
+    doc.text(`${installQty}`, 115 + 44, y);
+    y += 6;
+  }
   doc.setFontSize(11);
-  y += 6;
 
   doc.setFont('helvetica', 'bold');
   doc.text('Quantity:', margin, y);
   doc.setFont('helvetica', 'normal');
-  doc.text(`${quantity} tires`, margin + 30, y);
+  doc.text(`${quantity} item${quantity === 1 ? '' : 's'}`, margin + 30, y);
   y += 6;
 
   doc.setFont('helvetica', 'bold');
@@ -120,7 +129,7 @@ export function generateOptionsPDF({
   doc.roundedRect(margin, y - 4, pageWidth - margin * 2, 10, 2, 2, 'F');
   doc.setTextColor(180, 83, 9);
   doc.setFontSize(8);
-  doc.text('This document shows estimated costs for available tire options. Prices are subject to change. Not an invoice.', margin + 3, y + 2);
+  doc.text('This document shows estimated costs for available product options (tires, wheels/rims, and auto parts). Prices are subject to change. Not an invoice.', margin + 3, y + 2);
   y += 14;
 
   // === PRE-COMPUTE ROW DATA ===
@@ -133,9 +142,12 @@ export function generateOptionsPDF({
   const anySale = tires.some(t => typeof t.salePrice === 'number' && t.salePrice > 0);
   const showPeriod = anySale;
   const anyInstall = tires.some(t =>
-    includeInstallation && t.includeInstall !== false && parseTireSize(t.size)
+    includeInstallation && t.includeInstall !== false && (t.category || 'tire') === 'tire' && parseTireSize(t.size)
   );
   const showInstallCol = includeInstallation && anyInstall;
+
+  // One-word category tabs for the first table column (see table headers below)
+  const CAT_LABEL = { tire: 'Tire', wheel: 'Wheel', part: 'Part' };
 
   const rowMeta = tires.map(tire => {
     const parsed = parseTireSize(tire.size);
@@ -145,9 +157,9 @@ export function generateOptionsPDF({
     const regularPrice = getRegularPrice(tire);
     const sale = getSaleInfo(tire);
 
-    // Installation only when the item is installable AND the item didn't opt
-    // out (wheels/rims/sensors/lug nuts set includeInstall = false).
-    const installEligible = includeInstallation && tire.includeInstall !== false && parsed;
+    // Installation applies to tires only — wheels/parts (no parseable tire size
+    // or explicit opt-out) are excluded.
+    const installEligible = includeInstallation && tire.includeInstall !== false && parsed && (tire.category || 'tire') === 'tire';
     let installPerTire = 0;
     let totalHST;
     let grandTotal;
@@ -188,6 +200,7 @@ export function generateOptionsPDF({
     }
 
     const row = [
+      CAT_LABEL[tire.category || 'tire'] || 'Tire',
       tire.brand,
       tire.model,
       tire.size,
@@ -215,15 +228,17 @@ export function generateOptionsPDF({
   const rows = rowMeta.map(r => r.cells);
 
   // === TABLE HEADERS ===
-  const tableHeaders = ['Brand', 'Model', 'Size', 'Season', 'Stock', 'Price/Tire'];
+  // First column is a one-word category tab so the customer can scan tires vs.
+  // wheels/rims vs. parts at a glance. Absent/legacy items render as "Tire".
+  const tableHeaders = ['Category', 'Brand', 'Model', 'Size', 'Season', 'Stock', 'Price/Tire'];
   if (showPeriod) tableHeaders.push('Sale Period');
   if (showInstallCol) tableHeaders.push('Install/Tire');
   tableHeaders.push('HST (14%)', 'Total');
 
   // Fixed widths keep headers / season / size / price from wrapping the text.
   // Model (index 1) auto-sizes to whatever width remains on the page.
-  const col = { brand: 0, model: 1, size: 2, season: 3, stock: 4, price: 5 };
-  let next = 6;
+  const col = { category: 0, brand: 1, model: 2, size: 3, season: 4, stock: 5, price: 6 };
+  let next = 7;
   if (showPeriod) col.period = next++;
   if (showInstallCol) col.install = next++;
   col.hst = next++;
@@ -233,7 +248,8 @@ export function generateOptionsPDF({
   // Install/Tire, HST (14%), Sale Period) on a single line. Model auto-sizes to
   // whatever width remains.
   const columnStyles = {
-    [col.brand]: { cellWidth: 18 },
+    [col.category]: { cellWidth: 18 },
+    [col.brand]: { cellWidth: 16 },
     [col.size]: { cellWidth: 22 },
     [col.season]: { cellWidth: 20 },
     [col.stock]: { cellWidth: 12 },
@@ -266,6 +282,19 @@ export function generateOptionsPDF({
       fillColor: [248, 250, 252],
     },
     columnStyles,
+    didParseCell(hookData) {
+      const cell = hookData && hookData.cell;
+      const colIdx = cell && cell.column ? cell.column.index : (hookData && hookData.column ? hookData.column.index : undefined);
+      const section = hookData ? hookData.section : undefined;
+      if (section === 'body' && colIdx === col.category) {
+        // One-word category tab in the first column: tire=black, wheel=blue,
+        // part=orange.
+        const cat = String(cell.raw || '').toLowerCase();
+        if (cat === 'wheel') cell.textColor = [32, 86, 185];
+        else if (cat === 'part') cell.textColor = [214, 80, 41];
+        else cell.textColor = [40, 40, 40];
+      }
+    },
     margin: { left: margin, right: margin },
   });
 
@@ -312,7 +341,7 @@ export function generateOptionsPDF({
     if (includeInstallation) {
       notes.push(`• Installation includes off-rims mounting, balancing, and valve stems`);
       if (buyFromQuickRev) {
-        notes.push(`• 10% installation discount applied when purchasing tires from QuickRev`);
+        notes.push(`• 10% installation discount applied when purchasing from QuickRev`);
       } else {
         notes.push(`• Installation rates shown are for tires purchased elsewhere`);
       }
@@ -362,6 +391,6 @@ export function generateOptionsPDF({
 
   // Save
   const sizeLabel = (tireSize || 'quote').replace(/[^0-9a-zA-Z-]/g, '-');
-  const filename = `QuickRev-Tire-Options-${sizeLabel}-${new Date().toISOString().slice(0, 10)}.pdf`;
+  const filename = `QuickRev-Options-${sizeLabel}-${new Date().toISOString().slice(0, 10)}.pdf`;
   doc.save(filename);
 }
