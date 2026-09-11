@@ -484,6 +484,12 @@ export default function SearchPanel({ tires, updateTire, deleteTire, addTire, bu
   const startEdit = (tire) => {
     setEditingId(tire.id);
     setEditForm({ ...tire });
+    // The card swaps badges for edit inputs, which shifts content. Bring the
+    // edited card into view so the edit form is actually visible — without
+    // this, clicking Edit on a card lower down the page looks like a no-op.
+    requestAnimationFrame(() => {
+      document.getElementById(`item-card-${tire.id}`)?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+    });
   };
 
   const saveEdit = () => {
@@ -1903,7 +1909,7 @@ ${stockText}
 
             const inQuote = quoteItems.some(q => q.id === tire.id);
             return (
-              <div key={tire.id} className="card p-4">
+              <div key={tire.id} id={`item-card-${tire.id}`} className="card p-4">
                 <div className="flex items-start justify-between mb-3">
                   <div className="flex items-center gap-2">
                     <div
