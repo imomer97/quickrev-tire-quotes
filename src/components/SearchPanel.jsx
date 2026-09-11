@@ -329,17 +329,21 @@ export default function SearchPanel({ tires, updateTire, deleteTire, addTire, bu
         
         if (!sizeMatch && !brandMatch && !modelMatch) return false;
       }
-      // Distributor — general options plus per-warehouse Canada Tire options
-      const distMatch = activeDistributors.has(tire.distributorId)
+      // Distributor — general options plus per-warehouse Canada Tire options.
+      // When NO distributor is selected, search globally across all of them
+      // (results show where each item lives) instead of returning nothing.
+      const noDistributorSelected = activeDistributors.size === 0;
+      const distMatch = noDistributorSelected
+        || activeDistributors.has(tire.distributorId)
         || (tire.distributorId === 'canadaTire' && [...activeDistributors].some(id =>
             id.startsWith('ct:') && (tire.inventory || []).some(l => l.location === id.slice(3))));
       if (!distMatch) return false;
-      // Tier
-      if (!activeTiers.has(tire.tier)) return false;
+      // Tier — same global rule: no tiers selected means show everything
+      if (activeTiers.size > 0 && !activeTiers.has(tire.tier)) return false;
       // Season — only tires carry a season; wheels/parts skip this filter
-      if (isSeasonApplicable(tire) && !activeSeasons.has(tire.season)) return false;
-      // Category
-      if (!activeCategories.has(getCategory(tire))) return false;
+      if (isSeasonApplicable(tire) && activeSeasons.size > 0 && !activeSeasons.has(tire.season)) return false;
+      // Category — none selected shows everything, same global rule
+      if (activeCategories.size > 0 && !activeCategories.has(getCategory(tire))) return false;
       // Wheel bolt-pattern filter (only meaningful for wheels; for tires it's a
       // no-op so tire results aren't hidden).
       if (getCategory(tire) === 'wheel' && activeBoltPatterns.size > 0) {
