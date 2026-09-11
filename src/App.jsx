@@ -60,6 +60,8 @@ export default function App() {
             lastSyncAt={lastSyncAt}
             distributors={distributors}
             onAddDistributor={addDistributor}
+            installServiceRates={installServiceRates}
+            onSetInstallServiceRate={setInstallServiceRates}
           />
         )}
         {activeTab === 'import' && (

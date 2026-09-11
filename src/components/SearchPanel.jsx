@@ -33,19 +33,7 @@ import {
 } from '../data/distributors.js';
 import { generateOptionsPDF } from '../utils/pdfGenerator.js';
 
-// === INSTALL SERVICE CUSTOM RATES (module scope) ===
-// Per-vehicle-type overrides for the standalone installation service, kept in
-// localStorage so the Install Service popup defaults to them on every quote.
-const SERVICE_RATES_KEY = 'quickrev-install-service-rates';
-function loadInstallServiceRates() {
-  try {
-    const raw = localStorage.getItem(SERVICE_RATES_KEY);
-    const parsed = raw ? JSON.parse(raw) : null;
-    return parsed && typeof parsed === 'object' ? parsed : {};
-  } catch { return {}; }
-}
-
-export default function SearchPanel({ tires, updateTire, deleteTire, addTire, bulkUpdateTires, warehouseLocations, distributors, onAddDistributor }) {
+export default function SearchPanel({ tires, updateTire, deleteTire, addTire, bulkUpdateTires, warehouseLocations, distributors, onAddDistributor, installServiceRates, onSetInstallServiceRate }) {
   // === SEARCH & FILTERS ===
   const [searchSize, setSearchSize] = useState('');
   const [quantity, setQuantity] = useState(4);
@@ -169,7 +157,6 @@ export default function SearchPanel({ tires, updateTire, deleteTire, addTire, bu
   const [showInstallServiceModal, setShowInstallServiceModal] = useState(false);
   const [installServiceForm, setInstallServiceForm] = useState(null);
   const [showServiceRates, setShowServiceRates] = useState(false);
-  const [serviceRates, setServiceRates] = useState(loadInstallServiceRates);
   const [newTireForm, setNewTireForm] = useState({
     brand: '',
     model: '',
@@ -641,11 +628,12 @@ export default function SearchPanel({ tires, updateTire, deleteTire, addTire, bu
   // Per-vehicle-type overrides for the standalone installation service, kept
   // in localStorage so the popup defaults to them on every quote.
   const saveServiceRate = (vehicleKey, rate) => {
-    setServiceRates(prev => {
+    // Rates are shared across devices via the cloud sync (useTireData), so
+    // every device's Install Service popup uses the same defaults.
+    onSetInstallServiceRate(prev => {
       const next = { ...prev };
       if (rate == null || rate === '') delete next[vehicleKey];
       else next[vehicleKey] = parseFloat(rate) || 0;
-      try { localStorage.setItem(SERVICE_RATES_KEY, JSON.stringify(next)); } catch { /* ignore */ }
       return next;
     });
   };
@@ -671,8 +659,8 @@ export default function SearchPanel({ tires, updateTire, deleteTire, addTire, bu
     );
     // A saved custom rate for this vehicle type (set via Settings) wins over
     // the auto-calculated one.
-    const savedRates = loadInstallServiceRates();
-    const saved = savedRates && savedRates[vehicleType] != null ? savedRates[vehicleType] : null;
+    const savedRates = installServiceRates || {};
+    const saved = savedRates[vehicleType] != null ? savedRates[vehicleType] : null;
     setInstallServiceForm({
       perTire: (saved != null ? saved : autoPerTire).toFixed(2),
       usingSavedRate: saved != null,
@@ -1321,7 +1309,7 @@ ${stockText}
                   min="0"
                   placeholder="Auto"
                   className="input text-sm w-28"
-                  value={serviceRates[key] ?? ''}
+                  value={(installServiceRates || {})[key] ?? ''}
                   onChange={(e) => saveServiceRate(key, e.target.value === '' ? null : e.target.value)}
                 />
               </div>

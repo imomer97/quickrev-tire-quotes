@@ -118,7 +118,7 @@ function requireSyncKey(req, res, next) {
   next();
 }
 
-const EMPTY_SYNC = { manualTires: [], overrides: {}, deletedKeys: [], warehouseLocations: [], customDistributors: [] };
+const EMPTY_SYNC = { manualTires: [], overrides: {}, deletedKeys: [], warehouseLocations: [], customDistributors: [], installServiceRates: {} };
 
 // Pull the shared data (the app calls this on load).
 app.get('/api/sync-data', requireSyncKey, async (req, res) => {
@@ -142,6 +142,7 @@ app.put('/api/sync-data', requireSyncKey, async (req, res) => {
   const deletedKeys = Array.isArray(body.deletedKeys) ? body.deletedKeys : [];
   const warehouseLocations = Array.isArray(body.warehouseLocations) ? body.warehouseLocations : [];
   const customDistributors = Array.isArray(body.customDistributors) ? body.customDistributors : [];
+  const installServiceRates = body.installServiceRates && typeof body.installServiceRates === 'object' ? body.installServiceRates : null;
   try {
     const prev = (await store.read()) || EMPTY_SYNC;
 
@@ -171,12 +172,24 @@ app.put('/api/sync-data', requireSyncKey, async (req, res) => {
 
     const mergedManual = [...byKey.values()].filter(t => !prevDeleted.has(t.syncKey));
 
+    // Install-service rates: union-merge per vehicle type. A device that
+    // doesn't send rates (or sends none) never erases the shared ones — a
+    // rate is only removed when the sender explicitly sends null for it.
+    const mergedRates = { ...((prev && prev.installServiceRates) || {}) };
+    if (installServiceRates) {
+      for (const [k, v] of Object.entries(installServiceRates)) {
+        if (v == null) delete mergedRates[k];
+        else mergedRates[k] = v;
+      }
+    }
+
     await store.write({
       manualTires: mergedManual,
       overrides,
       deletedKeys: [...prevDeleted].slice(-500),
       warehouseLocations,
       customDistributors,
+      installServiceRates: mergedRates,
     });
     res.json({ success: true, storage: store.kind });
   } catch (err) {

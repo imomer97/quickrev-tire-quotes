@@ -5,6 +5,7 @@ const STORAGE_KEY = 'quickrev_tire_inventory';
 const LOCATIONS_KEY = 'quickrev_ct_locations';
 const CUSTOM_DIST_KEY = 'quickrev_custom_distributors';
 const LAST_SYNC_KEY = 'quickrev_ct_last_sync';
+const INSTALL_RATES_KEY = 'quickrev-install-service-rates';
 
 // Safety cap: a broad Canada Tire sync can return thousands of tires, which
 // freezes the app when rendered. Import at most this many per sync; the UI
@@ -101,6 +102,16 @@ export function useTireData() {
       return [];
     }
   });
+  // Per-vehicle-type install-service rates, shared across devices via the
+  // same cloud sync as the catalog.
+  const [installServiceRates, setInstallServiceRates] = useState(() => {
+    try {
+      const stored = localStorage.getItem(INSTALL_RATES_KEY);
+      return stored ? JSON.parse(stored) : {};
+    } catch {
+      return {};
+    }
+  });
   const [syncAllRunning, setSyncAllRunning] = useState(false);
   // Live progress for the header sync button, e.g.
   // { running: true, current: 2, total: 6, location: 'Toronto, ON' }
@@ -119,6 +130,12 @@ export function useTireData() {
   locationsRef.current = warehouseLocations;
   const customDistRef = useRef(customDistributors);
   customDistRef.current = customDistributors;
+  const installRatesRef = useRef(installServiceRates);
+  installRatesRef.current = installServiceRates;
+
+  useEffect(() => {
+    localStorage.setItem(INSTALL_RATES_KEY, JSON.stringify(installServiceRates));
+  }, [installServiceRates]);
 
   useEffect(() => {
     localStorage.setItem(CUSTOM_DIST_KEY, JSON.stringify(customDistributors));
@@ -628,6 +645,13 @@ export function useTireData() {
         });
       }
 
+      // Union-merge the shared install-service rates (server is authoritative
+      // per key; local-only keys are kept and seeded by the next push).
+      const mergedRates = {
+        ...installRatesRef.current,
+        ...((data.installServiceRates && typeof data.installServiceRates === 'object') ? data.installServiceRates : {}),
+      };
+
       const mergedLocs = [...new Set([
         ...locationsRef.current,
         ...(Array.isArray(data.warehouseLocations) ? data.warehouseLocations : []),
@@ -640,8 +664,9 @@ export function useTireData() {
       setTires(next);
       setWarehouseLocations(mergedLocs);
       setCustomDistributors(mergedCust);
+      setInstallServiceRates(mergedRates);
       setCloudSyncStatus('ok');
-      return { success: true, tires: next, warehouseLocations: mergedLocs, customDistributors: mergedCust };
+      return { success: true, tires: next, warehouseLocations: mergedLocs, customDistributors: mergedCust, installServiceRates: mergedRates };
     } catch (err) {
       console.warn('Cloud sync pull failed (app keeps working offline):', err.message);
       setCloudSyncStatus('error');
@@ -682,6 +707,7 @@ export function useTireData() {
           deletedKeys: [...deletedKeysRef.current],
           warehouseLocations: snapshot?.warehouseLocations || locationsRef.current,
           customDistributors: snapshot?.customDistributors || customDistRef.current,
+          installServiceRates: snapshot?.installServiceRates || installRatesRef.current,
         }),
       });
       if (!res.ok) throw new Error('HTTP ' + res.status);
@@ -710,6 +736,7 @@ export function useTireData() {
               tires: pulled.tires || tiresRef.current,
               warehouseLocations: pulled.warehouseLocations,
               customDistributors: pulled.customDistributors,
+              installServiceRates: pulled.installServiceRates,
             }
           : undefined;
         await pushServerData(seed);
@@ -727,7 +754,7 @@ export function useTireData() {
     clearTimeout(pushTimerRef.current);
     pushTimerRef.current = setTimeout(() => { pushServerData(); }, 800);
     return () => clearTimeout(pushTimerRef.current);
-  }, [tires, warehouseLocations, customDistributors, pushServerData]);
+  }, [tires, warehouseLocations, customDistributors, installServiceRates, pushServerData]);
 
   const getAllDistributors = useCallback(() => [...DISTRIBUTORS, ...customDistributors], [customDistributors]);
 
@@ -774,6 +801,8 @@ export function useTireData() {
     removeDistributor,
     exportData,
     importData,
+    installServiceRates,
+    setInstallServiceRates,
     cloudSyncStatus,
     // Retry the whole sync: re-pull the shared data, then push with the merged
     // snapshot so we never upload our stale local state (which could wipe
@@ -786,6 +815,7 @@ export function useTireData() {
               tires: pulled.tires,
               warehouseLocations: pulled.warehouseLocations,
               customDistributors: pulled.customDistributors,
+              installServiceRates: pulled.installServiceRates,
             }
           : undefined
       );
