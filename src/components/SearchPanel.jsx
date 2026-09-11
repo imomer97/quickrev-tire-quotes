@@ -613,12 +613,15 @@ export default function SearchPanel({ tires, updateTire, deleteTire, addTire, bu
   // === QUOTE HANDLERS ===
   // Moves the currently selected search results into the persistent quote,
   // then clears the transient selection so the user can search again.
+  // Each quote line carries its own quantity (defaulting to the global
+  // "number of tires" field) so mixed quotes — e.g. 4 tires + 2 brake kits —
+  // price correctly.
   const addSelectedToQuote = () => {
     if (selectedIds.size === 0) return;
     const items = filteredTires.filter(t => selectedIds.has(t.id));
     setQuoteItems(prev => {
       const seen = new Set(prev.map(i => i.id));
-      const toAdd = items.filter(t => !seen.has(t.id));
+      const toAdd = items.filter(t => !seen.has(t.id)).map(t => ({ ...t, quoteQty: quantity }));
       return [...prev, ...toAdd];
     });
     setSelectedIds(new Set());
@@ -626,6 +629,11 @@ export default function SearchPanel({ tires, updateTire, deleteTire, addTire, bu
 
   const removeFromQuote = (id) => {
     setQuoteItems(prev => prev.filter(i => i.id !== id));
+  };
+
+  const setQuoteItemQty = (id, qty) => {
+    const q = Math.max(1, parseInt(qty, 10) || 1);
+    setQuoteItems(prev => prev.map(i => i.id === id ? { ...i, quoteQty: q } : i));
   };
 
   /**
@@ -743,6 +751,8 @@ export default function SearchPanel({ tires, updateTire, deleteTire, addTire, bu
     }
     generateOptionsPDF({
       tires: quoteItems,
+      // Per-line quantity (falls back to the global field for legacy quote items)
+      quantityFor: (item) => (item && typeof item.quoteQty === 'number' && item.quoteQty > 0) ? item.quoteQty : quantity,
       quantity,
       vehicleType,
       buyFromQuickRev,
@@ -1250,9 +1260,24 @@ ${stockText}
                       <span className="text-sm font-semibold mr-2">{item.brand} {item.model}</span>
                       <span className="badge badge-gray font-mono">{item.size}</span>
                       <span className="text-xs text-muted ml-2">
-                        {item.isService ? 'One job' : `${quantity} ×`} {formatCurrency(qCalc.tireTotal)}{!item.isService && ` = ${formatCurrency(qCalc.tireTotal * quantity)}`}
+                        {item.isService
+                          ? `One job · ${formatCurrency(qCalc.tireTotal)}`
+                          : `${item.quoteQty ?? quantity} × ${formatCurrency(qCalc.tireTotal)} = ${formatCurrency(qCalc.tireTotal * (item.quoteQty ?? quantity))}`}
                       </span>
                     </div>
+                    {/* Per-item quantity — mixed quotes need different counts per line */}
+                    {!item.isService && (
+                      <input
+                        type="number"
+                        min="1"
+                        step="1"
+                        className="input text-sm w-16"
+                        title="Quantity for this item"
+                        aria-label={`Quantity of ${item.brand} ${item.model}`}
+                        value={item.quoteQty ?? quantity}
+                        onChange={(e) => setQuoteItemQty(item.id, e.target.value)}
+                      />
+                    )}
                     <button className="btn btn-sm btn-ghost p-1 text-danger" onClick={() => removeFromQuote(item.id)} title="Remove from quote">
                       <X className="w-4 h-4" />
                     </button>
@@ -1532,12 +1557,11 @@ ${stockText}
                   />
                 </div>
               </div>
-              {((newTireForm.category || 'tire') === 'tire') && (
-                <div>
-                  <label className="text-sm font-medium mb-1 block">Distributor</label>
-                  <select
-                    className="input select"
-                    value={newTireForm.distributorId}
+              <div>
+                <label className="text-sm font-medium mb-1 block">Distributor</label>
+                <select
+                  className="input select"
+                  value={newTireForm.distributorId}
                     onChange={(e) => {
                       if (e.target.value === '__new__') {
                         const name = window.prompt('New distributor name:');
@@ -1550,11 +1574,10 @@ ${stockText}
                       }
                     }}
                   >
-                    {distributors.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
-                    <option value="__new__">+ New distributor…</option>
-                  </select>
-                </div>
-              )}
+                  {distributors.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
+                  <option value="__new__">+ New distributor…</option>
+                </select>
+              </div>
             </div>
             <div className="flex gap-2">
               <button className="btn btn-success flex-1" onClick={handleAddTire}>

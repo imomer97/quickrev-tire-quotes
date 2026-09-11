@@ -38,6 +38,7 @@ function shortDate(d) {
 export function generateOptionsPDF({
   tires,
   quantity = 4,
+  quantityFor = null,
   vehicleType = 'sedan',
   buyFromQuickRev = true,
   includeInstallation = true,
@@ -159,7 +160,8 @@ export function generateOptionsPDF({
     const parsed = parseTireSize(tire.size);
     // Installation-service line items are priced as one job (their `price` is
     // the full install total), so they never multiply by the quote quantity.
-    const itemQty = tire.isService ? 1 : quantity;
+    // Other lines honor their per-item quantity when provided.
+    const itemQty = tire.isService ? 1 : (quantityFor ? quantityFor(tire) : quantity);
 
     // Sale-aware pricing (matches the item cards). Free items price at $0.
     const tirePrice = getEffectiveRetail(tire);
