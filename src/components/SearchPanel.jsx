@@ -534,8 +534,13 @@ export default function SearchPanel({ tires, updateTire, deleteTire, addTire, bu
     });
   };
 
-  const selectAllFiltered = () => {
-    if (selectedIds.size === filteredTires.length && filteredTires.length > 0) {
+  // Predictable select/deselect: if ANY items are selected the button clears
+  // them; otherwise it selects everything visible. The old rule (compare
+  // selection size to result count) made deselect impossible unless the
+  // selection exactly matched the results — clicking then ADDED to the
+  // selection, which read as "deselect all isn't working".
+  const toggleSelectAll = () => {
+    if (selectedIds.size > 0) {
       setSelectedIds(new Set());
     } else {
       setSelectedIds(new Set(filteredTires.map(t => t.id)));
@@ -1705,8 +1710,12 @@ ${stockText}
                 {showBulkEdit ? 'Hide Bulk Edit' : `Bulk Edit (${selectedIds.size})`}
               </button>
             )}
-            <button className="btn btn-sm btn-outline" onClick={selectAllFiltered}>
-              {selectedIds.size === filteredTires.length ? 'Deselect All' : 'Select All'}
+            <button
+              className="btn btn-sm btn-outline"
+              onClick={toggleSelectAll}
+              title={selectedIds.size > 0 ? 'Clear the current selection' : 'Select every item in the current results'}
+            >
+              {selectedIds.size > 0 ? `Deselect All (${selectedIds.size})` : 'Select All'}
             </button>
           </div>
         </div>
