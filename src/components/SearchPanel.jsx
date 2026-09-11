@@ -154,6 +154,8 @@ export default function SearchPanel({ tires, updateTire, deleteTire, addTire, bu
 
   // === ADD TIRE MODAL ===
   const [showAddModal, setShowAddModal] = useState(false);
+  const [showInstallServiceModal, setShowInstallServiceModal] = useState(false);
+  const [installServiceForm, setInstallServiceForm] = useState(null);
   const [newTireForm, setNewTireForm] = useState({
     brand: '',
     model: '',
@@ -623,25 +625,36 @@ export default function SearchPanel({ tires, updateTire, deleteTire, addTire, bu
 
   /**
    * Quote the installation service on its own — for customers supplying their
-   * own tires (who may still buy wheels, TPMS, etc.). Builds a one-off service
-   * line item from the current installation calculator settings (vehicle type,
-   * tire size, discount) plus the travel surcharge context.
+   * own tires (who may still buy wheels, TPMS, etc.). Opens a popup prefilled
+   * from the installation calculator so the rate/count can be tweaked first.
    */
-  const addInstallServiceToQuote = () => {
+  const openInstallServiceModal = () => {
     if (!vehicleType) {
       alert('Select a vehicle type first — the installation rate depends on it.');
       return;
     }
     const parsed = parseTireSize(searchSize || pdfTireSize);
-    const perTire = calculateInstallationPerTire(
+    const autoPerTire = calculateInstallationPerTire(
       parsed ? parsed.width : 0,
       parsed ? parsed.aspect : 0,
       parsed ? parsed.rim : 0,
       vehicleType,
       buyFromQuickRev
     );
-    const qty = installQty > 0 ? installQty : quantity;
-    const sizeLabel = (searchSize || pdfTireSize || 'customer tires').toUpperCase();
+    setInstallServiceForm({
+      perTire: autoPerTire.toFixed(2),
+      qty: installQty > 0 ? installQty : quantity,
+      sizeLabel: (searchSize || pdfTireSize || 'customer tires').toUpperCase(),
+      vehicleLabel: VEHICLE_LABELS[vehicleType] || vehicleType,
+      discounted: buyFromQuickRev,
+    });
+    setShowInstallServiceModal(true);
+  };
+
+  const confirmInstallService = () => {
+    const perTire = parseFloat(installServiceForm.perTire) || 0;
+    const qty = Math.max(1, parseInt(installServiceForm.qty, 10) || 1);
+    const sizeLabel = (installServiceForm.sizeLabel || 'customer tires').toUpperCase();
     const serviceItem = {
       id: `service-install-${Date.now()}`,
       category: 'service',
@@ -662,6 +675,7 @@ export default function SearchPanel({ tires, updateTire, deleteTire, addTire, bu
     };
     setQuoteItems(prev => [...prev, serviceItem]);
     setManualQuoteOrder(true);
+    setShowInstallServiceModal(false);
   };
 
   const clearQuote = () => {
@@ -810,7 +824,7 @@ ${stockText}
             </button>
             <button
               className="btn btn-primary"
-              onClick={addInstallServiceToQuote}
+              onClick={openInstallServiceModal}
               disabled={!vehicleType}
               title="Quote the installation service by itself (customer's own tires) — uses the installation calculator"
             >
@@ -1239,6 +1253,68 @@ ${stockText}
           </div>
         )}
       </div>
+
+      {/* === INSTALL SERVICE MODAL === */}
+      {showInstallServiceModal && installServiceForm && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg p-6 max-w-sm w-full">
+            <h2 className="text-lg font-bold mb-1">Installation Service</h2>
+            <p className="text-xs text-muted mb-4">
+              {installServiceForm.vehicleLabel}
+              {installServiceForm.discounted ? ' · 10% discount applied' : ' · no discount'}
+              {' — edit before adding to the quote.'}
+            </p>
+            <div className="flex-col gap-3 mb-4">
+              <div>
+                <label className="text-sm font-medium mb-1 block">Size / Description</label>
+                <input
+                  type="text"
+                  className="input"
+                  value={installServiceForm.sizeLabel}
+                  onChange={(e) => setInstallServiceForm(f => ({ ...f, sizeLabel: e.target.value }))}
+                />
+              </div>
+              <div className="flex gap-3">
+                <div className="flex-1">
+                  <label className="text-sm font-medium mb-1 block">Rate per tire ($)</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    className="input"
+                    value={installServiceForm.perTire}
+                    onChange={(e) => setInstallServiceForm(f => ({ ...f, perTire: e.target.value }))}
+                  />
+                </div>
+                <div className="flex-1">
+                  <label className="text-sm font-medium mb-1 block">Tires to install</label>
+                  <input
+                    type="number"
+                    min="1"
+                    className="input"
+                    value={installServiceForm.qty}
+                    onChange={(e) => setInstallServiceForm(f => ({ ...f, qty: e.target.value }))}
+                  />
+                </div>
+              </div>
+              <div className="bg-slate-50 rounded-lg p-3 text-sm flex justify-between font-medium">
+                <span>Job total (pre-tax)</span>
+                <span className="font-mono">{formatCurrency((parseFloat(installServiceForm.perTire) || 0) * (parseInt(installServiceForm.qty, 10) || 0))}</span>
+              </div>
+            </div>
+            <div className="flex gap-2">
+              <button className="btn btn-success flex-1" onClick={confirmInstallService}>
+                <Check className="w-4 h-4" />
+                Add to Quote
+              </button>
+              <button className="btn btn-ghost flex-1" onClick={() => setShowInstallServiceModal(false)}>
+                <X className="w-4 h-4" />
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* === ADD TIRE MODAL === */}
       {showAddModal && (
