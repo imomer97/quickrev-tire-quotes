@@ -33,6 +33,18 @@ import {
 } from '../data/distributors.js';
 import { generateOptionsPDF } from '../utils/pdfGenerator.js';
 
+// === INSTALL SERVICE CUSTOM RATES (module scope) ===
+// Per-vehicle-type overrides for the standalone installation service, kept in
+// localStorage so the Install Service popup defaults to them on every quote.
+const SERVICE_RATES_KEY = 'quickrev-install-service-rates';
+function loadInstallServiceRates() {
+  try {
+    const raw = localStorage.getItem(SERVICE_RATES_KEY);
+    const parsed = raw ? JSON.parse(raw) : null;
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch { return {}; }
+}
+
 export default function SearchPanel({ tires, updateTire, deleteTire, addTire, bulkUpdateTires, warehouseLocations, distributors, onAddDistributor }) {
   // === SEARCH & FILTERS ===
   const [searchSize, setSearchSize] = useState('');
@@ -156,6 +168,8 @@ export default function SearchPanel({ tires, updateTire, deleteTire, addTire, bu
   const [showAddModal, setShowAddModal] = useState(false);
   const [showInstallServiceModal, setShowInstallServiceModal] = useState(false);
   const [installServiceForm, setInstallServiceForm] = useState(null);
+  const [showServiceRates, setShowServiceRates] = useState(false);
+  const [serviceRates, setServiceRates] = useState(loadInstallServiceRates);
   const [newTireForm, setNewTireForm] = useState({
     brand: '',
     model: '',
@@ -623,10 +637,24 @@ export default function SearchPanel({ tires, updateTire, deleteTire, addTire, bu
     setQuoteItems(prev => prev.filter(i => i.id !== id));
   };
 
+  // === INSTALL SERVICE CUSTOM RATES ===
+  // Per-vehicle-type overrides for the standalone installation service, kept
+  // in localStorage so the popup defaults to them on every quote.
+  const saveServiceRate = (vehicleKey, rate) => {
+    setServiceRates(prev => {
+      const next = { ...prev };
+      if (rate == null || rate === '') delete next[vehicleKey];
+      else next[vehicleKey] = parseFloat(rate) || 0;
+      try { localStorage.setItem(SERVICE_RATES_KEY, JSON.stringify(next)); } catch { /* ignore */ }
+      return next;
+    });
+  };
+
   /**
    * Quote the installation service on its own — for customers supplying their
    * own tires (who may still buy wheels, TPMS, etc.). Opens a popup prefilled
-   * from the installation calculator so the rate/count can be tweaked first.
+   * from the installation calculator (or a saved custom rate for this vehicle
+   * type) so the rate/count/travel can be tweaked first.
    */
   const openInstallServiceModal = () => {
     if (!vehicleType) {
@@ -641,12 +669,19 @@ export default function SearchPanel({ tires, updateTire, deleteTire, addTire, bu
       vehicleType,
       buyFromQuickRev
     );
+    // A saved custom rate for this vehicle type (set via Settings) wins over
+    // the auto-calculated one.
+    const savedRates = loadInstallServiceRates();
+    const saved = savedRates && savedRates[vehicleType] != null ? savedRates[vehicleType] : null;
     setInstallServiceForm({
-      perTire: autoPerTire.toFixed(2),
+      perTire: (saved != null ? saved : autoPerTire).toFixed(2),
+      usingSavedRate: saved != null,
       qty: installQty > 0 ? installQty : quantity,
       sizeLabel: (searchSize || pdfTireSize || 'customer tires').toUpperCase(),
       vehicleLabel: VEHICLE_LABELS[vehicleType] || vehicleType,
       discounted: buyFromQuickRev,
+      // Default the travel surcharge to the current postal-code lookup
+      travel: postalInfo.surcharge || 0,
     });
     setShowInstallServiceModal(true);
   };
@@ -654,16 +689,17 @@ export default function SearchPanel({ tires, updateTire, deleteTire, addTire, bu
   const confirmInstallService = () => {
     const perTire = parseFloat(installServiceForm.perTire) || 0;
     const qty = Math.max(1, parseInt(installServiceForm.qty, 10) || 1);
+    const travel = Math.max(0, parseFloat(installServiceForm.travel) || 0);
     const sizeLabel = (installServiceForm.sizeLabel || 'customer tires').toUpperCase();
     const serviceItem = {
       id: `service-install-${Date.now()}`,
       category: 'service',
       brand: 'QuickRev',
       model: 'Installation Service',
-      // Total install price for the job, stored in `price` — services are
-      // quoted as one line, not per unit.
-      price: +(perTire * qty).toFixed(2),
-      size: `${sizeLabel} · ${qty} tire${qty === 1 ? '' : 's'}`,
+      // Whole visit in one line: install labor + travel surcharge. Services
+      // are quoted as one line, not per unit.
+      price: +(perTire * qty + travel).toFixed(2),
+      size: `${sizeLabel} · ${qty} tire${qty === 1 ? '' : 's'}${travel > 0 ? ` · travel ${formatCurrency(travel)}` : ''}`,
       season: 'None',
       tier: 'service',
       stock: 1,
@@ -671,6 +707,7 @@ export default function SearchPanel({ tires, updateTire, deleteTire, addTire, bu
       isService: true,
       serviceQty: qty,
       servicePerUnit: +perTire.toFixed(2),
+      serviceTravel: travel,
       _transient: true,
     };
     setQuoteItems(prev => [...prev, serviceItem]);
@@ -830,6 +867,14 @@ ${stockText}
             >
               <Wrench className="w-4 h-4" />
               Install Service
+            </button>
+            <button
+              className="btn btn-ghost"
+              onClick={() => setShowServiceRates(v => !v)}
+              title="Set default install-service rates per vehicle type"
+            >
+              <Info className="w-4 h-4" />
+              Rates
             </button>
           </div>
 
@@ -1254,6 +1299,37 @@ ${stockText}
         )}
       </div>
 
+      {/* === INSTALL SERVICE DEFAULT RATES PANEL === */}
+      {showServiceRates && (
+        <div className="card p-4">
+          <div className="flex items-center justify-between mb-2">
+            <h3 className="font-semibold text-sm">Default Install-Service Rates</h3>
+            <button className="btn btn-sm btn-ghost" onClick={() => setShowServiceRates(false)}>
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+          <p className="text-xs text-muted mb-3">
+            Optional. Set a flat per-tire rate per vehicle type and the Install Service popup will default to it instead of the calculator. Blank = calculator rate.
+          </p>
+          <div className="flex flex-wrap gap-3">
+            {Object.entries(VEHICLE_LABELS).map(([key, label]) => (
+              <div key={key}>
+                <span className="text-xs text-muted block mb-1">{label}</span>
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  placeholder="Auto"
+                  className="input text-sm w-28"
+                  value={serviceRates[key] ?? ''}
+                  onChange={(e) => saveServiceRate(key, e.target.value === '' ? null : e.target.value)}
+                />
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* === INSTALL SERVICE MODAL === */}
       {showInstallServiceModal && installServiceForm && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
@@ -1297,9 +1373,23 @@ ${stockText}
                   />
                 </div>
               </div>
+              <div>
+                <label className="text-sm font-medium mb-1 block">Travel surcharge ($, per job)</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  className="input"
+                  value={installServiceForm.travel ?? 0}
+                  onChange={(e) => setInstallServiceForm(f => ({ ...f, travel: e.target.value }))}
+                />
+              </div>
               <div className="bg-slate-50 rounded-lg p-3 text-sm flex justify-between font-medium">
-                <span>Job total (pre-tax)</span>
-                <span className="font-mono">{formatCurrency((parseFloat(installServiceForm.perTire) || 0) * (parseInt(installServiceForm.qty, 10) || 0))}</span>
+                <span>Job total (pre-tax, incl. travel)</span>
+                <span className="font-mono">{formatCurrency(
+                  (parseFloat(installServiceForm.perTire) || 0) * (parseInt(installServiceForm.qty, 10) || 0) +
+                  (Math.max(0, parseFloat(installServiceForm.travel) || 0))
+                )}</span>
               </div>
             </div>
             <div className="flex gap-2">
