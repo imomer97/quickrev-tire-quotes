@@ -635,6 +635,15 @@ export default function SearchPanel({ tires, updateTire, deleteTire, addTire, bu
     setQuoteItems(prev => prev.filter(i => i.id !== id));
   };
 
+  // Add a single item straight from its product card — no need to tick the
+  // checkbox and scroll up to the "Add selected to quote" button.
+  const addOneToQuote = (tire) => {
+    setQuoteItems(prev => {
+      if (prev.some(i => i.id === tire.id)) return prev;
+      return [...prev, { ...tire, quoteQty: quantity }];
+    });
+  };
+
   const setQuoteItemQty = (id, qty) => {
     const q = Math.max(1, parseInt(qty, 10) || 1);
     setQuoteItems(prev => prev.map(i => i.id === id ? { ...i, quoteQty: q } : i));
@@ -660,8 +669,10 @@ export default function SearchPanel({ tires, updateTire, deleteTire, addTire, bu
       buyFromQuickRev
     );
     setInstallServiceForm({
+      serviceName: 'Installation Service',
       perTire: autoPerTire.toFixed(2),
       qty: installQty > 0 ? installQty : quantity,
+      unit: 'tire',
       sizeLabel: (searchSize || pdfTireSize || 'customer tires').toUpperCase(),
       vehicleLabel: VEHICLE_LABELS[vehicleType] || vehicleType,
       discounted: buyFromQuickRev,
@@ -676,15 +687,18 @@ export default function SearchPanel({ tires, updateTire, deleteTire, addTire, bu
     const qty = Math.max(1, parseInt(installServiceForm.qty, 10) || 1);
     const travel = Math.max(0, parseFloat(installServiceForm.travel) || 0);
     const sizeLabel = (installServiceForm.sizeLabel || 'customer tires').toUpperCase();
+    // Unit describes what the rate applies to — "tire" for installs, but the
+    // popup is generic ("axle", "hour", "brake job"…) for other services.
+    const unit = (installServiceForm.unit || 'tire').trim().toLowerCase() || 'tire';
     const serviceItem = {
       id: `service-install-${Date.now()}`,
       category: 'service',
       brand: 'QuickRev',
-      model: 'Installation Service',
-      // Whole visit in one line: install labor + travel surcharge. Services
-      // are quoted as one line, not per unit.
+      model: installServiceForm.serviceName || 'Installation Service',
+      // Whole visit in one line: labor + travel surcharge. Services are
+      // quoted as one line, not per unit.
       price: +(perTire * qty + travel).toFixed(2),
-      size: `${sizeLabel} · ${qty} tire${qty === 1 ? '' : 's'}${travel > 0 ? ` · travel ${formatCurrency(travel)}` : ''}`,
+      size: `${sizeLabel} · ${qty} ${unit}${qty === 1 ? '' : 's'}${travel > 0 ? ` · travel ${formatCurrency(travel)}` : ''}`,
       season: 'None',
       tier: 'service',
       stock: 1,
@@ -692,6 +706,8 @@ export default function SearchPanel({ tires, updateTire, deleteTire, addTire, bu
       isService: true,
       serviceQty: qty,
       servicePerUnit: +perTire.toFixed(2),
+      serviceUnit: unit,
+      serviceDesc: installServiceForm.serviceName || 'installation',
       serviceTravel: travel,
       _transient: true,
     };
@@ -1305,6 +1321,16 @@ ${stockText}
             </p>
             <div className="flex-col gap-3 mb-4">
               <div>
+                <label className="text-sm font-medium mb-1 block">Service name</label>
+                <input
+                  type="text"
+                  className="input"
+                  placeholder="e.g., Installation Service, Brake Job"
+                  value={installServiceForm.serviceName || 'Installation Service'}
+                  onChange={(e) => setInstallServiceForm(f => ({ ...f, serviceName: e.target.value }))}
+                />
+              </div>
+              <div>
                 <label className="text-sm font-medium mb-1 block">Size / Description</label>
                 <input
                   type="text"
@@ -1315,7 +1341,7 @@ ${stockText}
               </div>
               <div className="flex gap-3">
                 <div className="flex-1">
-                  <label className="text-sm font-medium mb-1 block">Rate per tire ($)</label>
+                  <label className="text-sm font-medium mb-1 block">Rate per unit ($)</label>
                   <input
                     type="number"
                     step="0.01"
@@ -1326,13 +1352,23 @@ ${stockText}
                   />
                 </div>
                 <div className="flex-1">
-                  <label className="text-sm font-medium mb-1 block">Tires to install</label>
+                  <label className="text-sm font-medium mb-1 block">Units</label>
                   <input
                     type="number"
                     min="1"
                     className="input"
                     value={installServiceForm.qty}
                     onChange={(e) => setInstallServiceForm(f => ({ ...f, qty: e.target.value }))}
+                  />
+                </div>
+                <div className="w-28">
+                  <label className="text-sm font-medium mb-1 block">Unit name</label>
+                  <input
+                    type="text"
+                    className="input"
+                    placeholder="tire, axle, hour…"
+                    value={installServiceForm.unit || 'tire'}
+                    onChange={(e) => setInstallServiceForm(f => ({ ...f, unit: e.target.value }))}
                   />
                 </div>
               </div>
@@ -2264,6 +2300,15 @@ ${stockText}
 
                 {/* Actions */}
                 <div className="flex gap-2 items-center">
+                  <button
+                    className="btn btn-primary flex-1 btn-sm"
+                    onClick={() => addOneToQuote(tire)}
+                    disabled={inQuote}
+                    title={inQuote ? 'Already in the quote' : 'Add this item to the quote'}
+                  >
+                    <Plus className="w-4 h-4" />
+                    {inQuote ? 'In Quote' : 'Add to Quote'}
+                  </button>
                   <button className="btn btn-secondary flex-1 btn-sm" onClick={() => copyQuote(tire)}>
                     <Download className="w-4 h-4" />
                     Copy Text

@@ -114,7 +114,9 @@ export function generateOptionsPDF({
   doc.setFont('helvetica', 'bold');
   doc.text('Quantity:', margin, y);
   doc.setFont('helvetica', 'normal');
-  doc.text(`${quantity} item${quantity === 1 ? '' : 's'}`, margin + 30, y);
+  // Total pieces quoted — the sum of each line's Qty column
+  const totalPieces = tires.reduce((sum, t) => sum + (t.isService ? 0 : (quantityFor ? quantityFor(t) : quantity)), 0);
+  doc.text(`${totalPieces} item${totalPieces === 1 ? '' : 's'}`, margin + 30, y);
   y += 6;
 
   doc.setFont('helvetica', 'bold');
@@ -238,7 +240,7 @@ export function generateOptionsPDF({
       tire.model,
       sizeCell,
       tire.season || '—',
-      tire.isService ? '—' : tire.stock.toString(),
+      tire.isService ? '—' : (itemQty != null ? String(itemQty) : tire.stock.toString()),
       formatCurrency(tirePrice),  // effective price (sale while active, else regular)
     ];
     if (showPeriod) row.push(salePeriod);               // e.g. "Aug 1 – 15" or "until Aug 15"
@@ -263,7 +265,7 @@ export function generateOptionsPDF({
   // === TABLE HEADERS ===
   // First column is a one-word category tab so the customer can scan tires vs.
   // wheels/rims vs. parts at a glance. Absent/legacy items render as "Tire".
-  const tableHeaders = ['Category', 'Brand', 'Model', 'Size', 'Season', 'Stock', 'Price/Tire'];
+  const tableHeaders = ['Category', 'Brand', 'Model', 'Size', 'Season', 'Qty', 'Price/Tire'];
   if (showPeriod) tableHeaders.push('Sale Period');
   if (showInstallCol) tableHeaders.push('Install/Tire');
   tableHeaders.push('HST (14%)', 'Total');
@@ -373,7 +375,7 @@ export function generateOptionsPDF({
 
     // Installation-service line items (customer-supplied tires)
     tires.filter(t => t.isService).forEach(t => {
-      notes.push(`• ${t.brand} ${t.model}: installation for ${t.size} — ${formatCurrency(t.servicePerUnit || 0)} per tire × ${t.serviceQty || 1} tire(s), quoted as one job`);
+      notes.push(`• ${t.brand} ${t.model}: ${t.serviceDesc || 'installation'} — ${formatCurrency(t.servicePerUnit || 0)} per ${t.serviceUnit || 'tire'} × ${t.serviceQty || 1} ${t.serviceUnit || 'tire'}${(t.serviceQty || 1) === 1 ? '' : 's'}, quoted as one job`);
     });
 
     // Only add installation notes if installation is included
