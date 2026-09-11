@@ -79,7 +79,34 @@ function normalizeDistributor(rawDistributor, distributors = DISTRIBUTORS) {
 export function useTireData() {
   const [tires, setTires] = useState(() => {
     const stored = localStorage.getItem(STORAGE_KEY);
-    return stored !== null ? JSON.parse(stored) : [];
+    let list = stored !== null ? JSON.parse(stored) : [];
+    if (Array.isArray(list)) {
+      // Collapse duplicate entries left by re-imports or multi-device pushes:
+      // manual items sharing a sync key keep the newest copy; identical ids are
+      // rewritten so React keys stay unique (duplicate keys break per-item
+      // selection/edit — selecting one card highlights them all).
+      const byKey = new Map();
+      const usedIds = new Set();
+      list = list.map(t => {
+        let id = t.id;
+        if (!id || usedIds.has(id)) id = (id || 'item') + '_' + Math.random().toString(36).slice(2, 8);
+        usedIds.add(id);
+        return { ...t, id };
+      });
+      for (const t of list) {
+        if (t.source !== 'api') {
+          const key = manualSyncKey(t);
+          const existing = byKey.get(key);
+          if (!existing || (t.updatedAt || t.createdAt || '') >= (existing.updatedAt || existing.createdAt || '')) {
+            byKey.set(key, t);
+          }
+        } else {
+          byKey.set(t.id, t);
+        }
+      }
+      list = [...byKey.values()];
+    }
+    return list;
   });
 
   const [isLoading, setIsLoading] = useState(false);
