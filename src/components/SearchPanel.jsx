@@ -34,7 +34,7 @@ import {
 } from '../data/distributors.js';
 import { generateOptionsPDF } from '../utils/pdfGenerator.js';
 
-export default function SearchPanel({ tires, updateTire, deleteTire, addTire, bulkUpdateTires, warehouseLocations, distributors, onAddDistributor, installServiceRates, onSetInstallServiceRate }) {
+export default function SearchPanel({ tires, updateTire, deleteTire, addTire, bulkUpdateTires, warehouseLocations, distributors, onAddDistributor }) {
   // === SEARCH & FILTERS ===
   const [searchSize, setSearchSize] = useState('');
   const [quantity, setQuantity] = useState(4);
@@ -157,7 +157,6 @@ export default function SearchPanel({ tires, updateTire, deleteTire, addTire, bu
   const [showAddModal, setShowAddModal] = useState(false);
   const [showInstallServiceModal, setShowInstallServiceModal] = useState(false);
   const [installServiceForm, setInstallServiceForm] = useState(null);
-  const [showServiceRates, setShowServiceRates] = useState(false);
   const [newTireForm, setNewTireForm] = useState({
     brand: '',
     model: '',
@@ -629,25 +628,11 @@ export default function SearchPanel({ tires, updateTire, deleteTire, addTire, bu
     setQuoteItems(prev => prev.filter(i => i.id !== id));
   };
 
-  // === INSTALL SERVICE CUSTOM RATES ===
-  // Per-vehicle-type overrides for the standalone installation service, kept
-  // in localStorage so the popup defaults to them on every quote.
-  const saveServiceRate = (vehicleKey, rate) => {
-    // Rates are shared across devices via the cloud sync (useTireData), so
-    // every device's Install Service popup uses the same defaults.
-    onSetInstallServiceRate(prev => {
-      const next = { ...prev };
-      if (rate == null || rate === '') delete next[vehicleKey];
-      else next[vehicleKey] = parseFloat(rate) || 0;
-      return next;
-    });
-  };
-
   /**
    * Quote the installation service on its own — for customers supplying their
    * own tires (who may still buy wheels, TPMS, etc.). Opens a popup prefilled
-   * from the installation calculator (or a saved custom rate for this vehicle
-   * type) so the rate/count/travel can be tweaked first.
+   * from the tire installation calculator so the rate/count/travel can be
+   * tweaked first.
    */
   const openInstallServiceModal = () => {
     if (!vehicleType) {
@@ -662,13 +647,8 @@ export default function SearchPanel({ tires, updateTire, deleteTire, addTire, bu
       vehicleType,
       buyFromQuickRev
     );
-    // A saved custom rate for this vehicle type (set via Settings) wins over
-    // the auto-calculated one.
-    const savedRates = installServiceRates || {};
-    const saved = savedRates[vehicleType] != null ? savedRates[vehicleType] : null;
     setInstallServiceForm({
-      perTire: (saved != null ? saved : autoPerTire).toFixed(2),
-      usingSavedRate: saved != null,
+      perTire: autoPerTire.toFixed(2),
       qty: installQty > 0 ? installQty : quantity,
       sizeLabel: (searchSize || pdfTireSize || 'customer tires').toUpperCase(),
       vehicleLabel: VEHICLE_LABELS[vehicleType] || vehicleType,
@@ -860,14 +840,6 @@ ${stockText}
             >
               <Wrench className="w-4 h-4" />
               Install Service
-            </button>
-            <button
-              className="btn btn-ghost"
-              onClick={() => setShowServiceRates(v => !v)}
-              title="Set default install-service rates per vehicle type"
-            >
-              <Info className="w-4 h-4" />
-              Rates
             </button>
           </div>
 
@@ -1291,37 +1263,6 @@ ${stockText}
           </div>
         )}
       </div>
-
-      {/* === INSTALL SERVICE DEFAULT RATES PANEL === */}
-      {showServiceRates && (
-        <div className="card p-4">
-          <div className="flex items-center justify-between mb-2">
-            <h3 className="font-semibold text-sm">Default Install-Service Rates</h3>
-            <button className="btn btn-sm btn-ghost" onClick={() => setShowServiceRates(false)}>
-              <X className="w-4 h-4" />
-            </button>
-          </div>
-          <p className="text-xs text-muted mb-3">
-            Optional. Set a flat per-tire rate per vehicle type and the Install Service popup will default to it instead of the calculator. Blank = calculator rate.
-          </p>
-          <div className="flex flex-wrap gap-3">
-            {Object.entries(VEHICLE_LABELS).map(([key, label]) => (
-              <div key={key}>
-                <span className="text-xs text-muted block mb-1">{label}</span>
-                <input
-                  type="number"
-                  step="0.01"
-                  min="0"
-                  placeholder="Auto"
-                  className="input text-sm w-28"
-                  value={(installServiceRates || {})[key] ?? ''}
-                  onChange={(e) => saveServiceRate(key, e.target.value === '' ? null : e.target.value)}
-                />
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
 
       {/* === INSTALL SERVICE MODAL === */}
       {showInstallServiceModal && installServiceForm && (
