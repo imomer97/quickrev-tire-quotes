@@ -120,7 +120,13 @@ export default function SearchPanel({ tires, updateTire, deleteTire, addTire, bu
   // Items deliberately "added to the quote" survive search/filter changes.
   // Each entry is a snapshot of the tire so the quote stays intact even if the
   // catalog is edited or the item is deleted later.
-  const [quoteItems, setQuoteItems] = useState([]);
+  const [quoteItems, setQuoteItems] = useState(() => {
+    // Restore the quote after a reload — items were chosen deliberately
+    try {
+      const stored = JSON.parse(localStorage.getItem('quickrev_quote_items') || '[]');
+      return Array.isArray(stored) ? stored : [];
+    } catch { return []; }
+  });
   // When true, the user has manually dragged items into a custom order, which
   // overrides the PDF's automatic price sort. Reset when the quote is cleared.
   const [manualQuoteOrder, setManualQuoteOrder] = useState(false);
@@ -630,6 +636,27 @@ export default function SearchPanel({ tires, updateTire, deleteTire, addTire, bu
     });
     setSelectedIds(new Set());
   };
+
+  // Selection is tied to what's on screen: when the filter/search results
+  // change, drop any selected ids that are no longer visible. Otherwise the
+  // "Add selected (N)" button counts hidden items and clicking it appears
+  // to do nothing — the classic "selection is broken" report.
+  useEffect(() => {
+    setSelectedIds(prev => {
+      if (prev.size === 0) return prev;
+      const visible = new Set(filteredTires.map(t => t.id));
+      const next = new Set([...prev].filter(id => visible.has(id)));
+      return next.size === prev.size ? prev : next;
+    });
+  }, [filteredTires]);
+
+  // Persist the quote across reloads — a lost quote reads as "my work vanished".
+  const QUOTE_STORAGE_KEY = 'quickrev_quote_items';
+  useEffect(() => {
+    try {
+      localStorage.setItem(QUOTE_STORAGE_KEY, JSON.stringify(quoteItems));
+    } catch { /* storage full or unavailable — quote just won't persist */ }
+  }, [quoteItems]);
 
   const removeFromQuote = (id) => {
     setQuoteItems(prev => prev.filter(i => i.id !== id));
