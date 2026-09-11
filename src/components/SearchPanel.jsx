@@ -398,6 +398,26 @@ export default function SearchPanel({ tires, updateTire, deleteTire, addTire, bu
   }, [tires, searchSize, activeDistributors, activeTiers, activeSeasons, activeCategories, activeBoltPatterns, activeDiameters, activeWidths, activeFitments, inStockOnly, minStock, sortBy, showInstall, vehicleType, buyFromQuickRev, getTireStock, getEffectiveRetail]);
 
   function getTireCalculations(tire) {
+    // Service line items (installation-only quotes) price as one job from
+    // their stored price — no size parsing or install math applies.
+    if (getCategory(tire) === 'service') {
+      const price = parseFloat(tire.price) || 0;
+      const hstS = price * HST_RATE;
+      return {
+        purchaseCost: 0,
+        retailPrice: price,
+        regularPrice: price,
+        hst: hstS,
+        tireTotal: price + hstS,
+        sale: { saleActive: false },
+        installPerTire: 0,
+        totalPreTax: price,
+        totalHST: hstS,
+        totalPerTire: price + hstS,
+        category: 'service',
+        envFee: 0,
+      };
+    }
     const parsed = parseTireSize(tire.size) || parseWheelSize(tire.size);
     const retailPrice = getEffectiveRetail(tire);
     const hst = retailPrice * HST_RATE;
@@ -601,6 +621,49 @@ export default function SearchPanel({ tires, updateTire, deleteTire, addTire, bu
     setQuoteItems(prev => prev.filter(i => i.id !== id));
   };
 
+  /**
+   * Quote the installation service on its own — for customers supplying their
+   * own tires (who may still buy wheels, TPMS, etc.). Builds a one-off service
+   * line item from the current installation calculator settings (vehicle type,
+   * tire size, discount) plus the travel surcharge context.
+   */
+  const addInstallServiceToQuote = () => {
+    if (!vehicleType) {
+      alert('Select a vehicle type first — the installation rate depends on it.');
+      return;
+    }
+    const parsed = parseTireSize(searchSize || pdfTireSize);
+    const perTire = calculateInstallationPerTire(
+      parsed ? parsed.width : 0,
+      parsed ? parsed.aspect : 0,
+      parsed ? parsed.rim : 0,
+      vehicleType,
+      buyFromQuickRev
+    );
+    const qty = installQty > 0 ? installQty : quantity;
+    const sizeLabel = (searchSize || pdfTireSize || 'customer tires').toUpperCase();
+    const serviceItem = {
+      id: `service-install-${Date.now()}`,
+      category: 'service',
+      brand: 'QuickRev',
+      model: 'Installation Service',
+      // Total install price for the job, stored in `price` — services are
+      // quoted as one line, not per unit.
+      price: +(perTire * qty).toFixed(2),
+      size: `${sizeLabel} · ${qty} tire${qty === 1 ? '' : 's'}`,
+      season: 'None',
+      tier: 'service',
+      stock: 1,
+      includeInstall: false,
+      isService: true,
+      serviceQty: qty,
+      servicePerUnit: +perTire.toFixed(2),
+      _transient: true,
+    };
+    setQuoteItems(prev => [...prev, serviceItem]);
+    setManualQuoteOrder(true);
+  };
+
   const clearQuote = () => {
     if (quoteItems.length === 0) return;
     setQuoteItems([]);
@@ -744,6 +807,15 @@ ${stockText}
             >
               <Plus className="w-4 h-4" />
               Add Item
+            </button>
+            <button
+              className="btn btn-primary"
+              onClick={addInstallServiceToQuote}
+              disabled={!vehicleType}
+              title="Quote the installation service by itself (customer's own tires) — uses the installation calculator"
+            >
+              <Wrench className="w-4 h-4" />
+              Install Service
             </button>
           </div>
 
@@ -1154,7 +1226,7 @@ ${stockText}
                       <span className="text-sm font-semibold mr-2">{item.brand} {item.model}</span>
                       <span className="badge badge-gray font-mono">{item.size}</span>
                       <span className="text-xs text-muted ml-2">
-                        {quantity} × {formatCurrency(qCalc.tireTotal)} = {formatCurrency(qCalc.tireTotal * quantity)}
+                        {item.isService ? 'One job' : `${quantity} ×`} {formatCurrency(qCalc.tireTotal)}{!item.isService && ` = ${formatCurrency(qCalc.tireTotal * quantity)}`}
                       </span>
                     </div>
                     <button className="btn btn-sm btn-ghost p-1 text-danger" onClick={() => removeFromQuote(item.id)} title="Remove from quote">
@@ -1720,6 +1792,18 @@ ${stockText}
                       {calc.sale.saleActive ? 'On Sale' : 'Sale'} {formatCurrency(calc.sale.salePrice)}
                       {calc.sale.saleStart && ` · ${calc.sale.saleStart.toLocaleDateString([], { month: 'short', day: 'numeric' })}`}
                       {calc.sale.saleEnd && ` – ${calc.sale.saleEnd.toLocaleDateString([], { month: 'short', day: 'numeric' })}`}
+                    </span>
+                  )}
+                  {/* Override badges — per-item custom markup / install fee are
+                      visible at a glance without opening edit mode */}
+                  {!isEditing && tire.markupOverride != null && (
+                    <span className="badge badge-yellow" title="Custom markup set on this item">
+                      Custom markup {formatCurrency(tire.markupOverride)}
+                    </span>
+                  )}
+                  {!isEditing && tire.installFee != null && (
+                    <span className="badge badge-yellow" title="Custom installation fee set on this item">
+                      Custom install {formatCurrency(tire.installFee)}
                     </span>
                   )}
                 </div>

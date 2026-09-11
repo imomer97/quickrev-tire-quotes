@@ -59,6 +59,7 @@ export const CATEGORIES = {
   tire: 'Tires',
   wheel: 'Wheels / Rims',
   part: 'Auto Parts',
+  service: 'Service',
 };
 
 export const CATEGORY_KEYS = Object.keys(CATEGORIES);
@@ -70,7 +71,8 @@ export function getCategory(item) {
 
 /** Non-tire items never carry a season — the filter should skip them entirely */
 export function isSeasonApplicable(item) {
-  return getCategory(item) === 'tire';
+  const cat = getCategory(item);
+  return cat === 'tire' || cat === 'service';
 }
 
 // ========== DISTRIBUTORS ==========
@@ -350,6 +352,8 @@ export function formatSize(sizeStr, item) {
  */
 export function getRegularPrice(tire) {
   if (tire && tire.isFree) return 0;
+  // Service items (e.g. installation-only quotes) price themselves directly
+  if (tire && getCategory(tire) === 'service') return parseFloat(tire.price) || 0;
   const priceOverride = parseFloat(tire.price);
   if (Number.isFinite(priceOverride) && priceOverride > 0) return priceOverride;
   return calculateRetailPrice(tire.wholesale, tire);

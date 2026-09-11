@@ -153,10 +153,13 @@ export function generateOptionsPDF({
   const showInstallCol = includeInstallation && anyInstall;
 
   // One-word category tabs for the first table column (see table headers below)
-  const CAT_LABEL = { tire: 'Tire', wheel: 'Wheel', part: 'Part' };
+  const CAT_LABEL = { tire: 'Tire', wheel: 'Wheel', part: 'Part', service: 'Service' };
 
   const rowMeta = tires.map(tire => {
     const parsed = parseTireSize(tire.size);
+    // Installation-service line items are priced as one job (their `price` is
+    // the full install total), so they never multiply by the quote quantity.
+    const itemQty = tire.isService ? 1 : quantity;
 
     // Sale-aware pricing (matches the item cards). Free items price at $0.
     const tirePrice = getEffectiveRetail(tire);
@@ -179,11 +182,11 @@ export function generateOptionsPDF({
       installPerTire = getInstallFeeForItem(tire, parsed, vehicleType, buyFromQuickRev);
       // Installation applies only to the number of tires to be installed (installQty)
       const installTotal = installPerTire * installQty;
-      const preTax = tirePrice * quantity + installTotal;
+      const preTax = tirePrice * itemQty + installTotal;
       totalHST = preTax * HST_RATE;
       grandTotal = preTax + totalHST;
     } else {
-      const preTax = tirePrice * quantity;
+      const preTax = tirePrice * itemQty;
       totalHST = preTax * HST_RATE;
       grandTotal = preTax + totalHST;
     }
@@ -233,7 +236,7 @@ export function generateOptionsPDF({
       tire.model,
       sizeCell,
       tire.season || '—',
-      tire.stock.toString(),
+      tire.isService ? '—' : tire.stock.toString(),
       formatCurrency(tirePrice),  // effective price (sale while active, else regular)
     ];
     if (showPeriod) row.push(salePeriod);               // e.g. "Aug 1 – 15" or "until Aug 15"
@@ -320,6 +323,7 @@ export function generateOptionsPDF({
         const cat = String(cell.raw || '').toLowerCase();
         if (cat === 'wheel') cell.textColor = [32, 86, 185];
         else if (cat === 'part') cell.textColor = [214, 80, 41];
+        else if (cat === 'service') cell.textColor = [22, 130, 93];
         else cell.textColor = [40, 40, 40];
       }
     },
@@ -364,6 +368,11 @@ export function generateOptionsPDF({
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(8);
     const notes = [];
+
+    // Installation-service line items (customer-supplied tires)
+    tires.filter(t => t.isService).forEach(t => {
+      notes.push(`• ${t.brand} ${t.model}: installation for ${t.size} — ${formatCurrency(t.servicePerUnit || 0)} per tire × ${t.serviceQty || 1} tire(s), quoted as one job`);
+    });
 
     // Only add installation notes if installation is included
     if (includeInstallation) {
