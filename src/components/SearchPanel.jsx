@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import { resizeImageFile } from '../utils/imageResize';
 import {
   Search, Download, Check, X, Pencil, Trash2, ChevronDown,
   FileText, CheckSquare, Square, Filter, ArrowUpDown,
@@ -163,6 +164,7 @@ export default function SearchPanel({ tires, updateTire, deleteTire, addTire, bu
     size: '',
     category: 'tire',
     fitment: '',
+    image: null,
     wholesale: '',
     stock: '',
     season: 'All-Season',
@@ -500,6 +502,7 @@ export default function SearchPanel({ tires, updateTire, deleteTire, addTire, bu
       salePrice,
       saleStart: editForm.saleStart || null,
       saleEnd: editForm.saleEnd || null,
+      image: editForm.image || null,
       includeInstall: !!editForm.includeInstall,
       isFree: !!editForm.isFree,
     });
@@ -578,6 +581,7 @@ export default function SearchPanel({ tires, updateTire, deleteTire, addTire, bu
       size: newTireForm.size.toUpperCase(),
       category: newTireForm.category || 'tire',
       fitment: (newTireForm.fitment || '').trim() || undefined,
+      image: newTireForm.image || undefined,
       wholesale: parseFloat(newTireForm.wholesale) || 0,
       stock: parseInt(newTireForm.stock, 10) || 0,
       season: newTireForm.category && newTireForm.category !== 'tire' ? 'None' : (newTireForm.season || 'All-Season'),
@@ -602,6 +606,7 @@ export default function SearchPanel({ tires, updateTire, deleteTire, addTire, bu
       salePrice: '',
       saleStart: '',
       saleEnd: '',
+      image: null,
     });
     setShowAddModal(false);
   };
@@ -1462,6 +1467,45 @@ ${stockText}
                 <p className="text-xs text-muted mt-1">Shown on the PDF and searchable in the Vehicle Fitment filter.</p>
               </div>
               <div>
+                <label className="text-sm font-medium mb-1 block">Image (optional)</label>
+                <div className="flex items-center gap-3">
+                  {newTireForm.image ? (
+                    <img src={newTireForm.image} alt="" className="w-14 h-14 object-cover rounded border border-slate-200" />
+                  ) : (
+                    <div className="w-14 h-14 rounded border border-dashed border-slate-300 flex items-center justify-center text-slate-300">
+                      <Info className="w-5 h-5" />
+                    </div>
+                  )}
+                  <div className="flex-1">
+                    <input
+                      type="file"
+                      accept="image/*"
+                      className="input text-xs"
+                      onChange={async (e) => {
+                        const file = e.target.files && e.target.files[0];
+                        if (!file) return;
+                        try {
+                          const dataUrl = await resizeImageFile(file);
+                          setNewTireForm(f => ({ ...f, image: dataUrl }));
+                        } catch (err) {
+                          alert('Could not load image: ' + err.message);
+                        }
+                      }}
+                    />
+                    <input
+                      type="text"
+                      className="input text-xs mt-1"
+                      placeholder="…or paste an image URL"
+                      value={(newTireForm.image || '').startsWith('data:') ? '' : (newTireForm.image || '')}
+                      onChange={(e) => setNewTireForm(f => ({ ...f, image: e.target.value.trim() || null }))}
+                    />
+                    {newTireForm.image ? (
+                      <button type="button" className="text-xs text-danger mt-1" onClick={() => setNewTireForm(f => ({ ...f, image: null }))}>Remove image</button>
+                    ) : null}
+                  </div>
+                </div>
+              </div>
+              <div>
                 <label className="text-sm font-medium mb-1 block">Wholesale Cost ($)</label>
                 <input
                   type="number"
@@ -1830,6 +1874,15 @@ ${stockText}
                         <path d="M5 12l5 5L20 7" />
                       </svg>
                     </div>
+                    {/* Item image thumbnail — always visible so staff recognize the part at a glance */}
+                    {!isEditing && tire.image ? (
+                      <img
+                        src={tire.image}
+                        alt={`${tire.brand} ${tire.model}`}
+                        className="w-12 h-12 object-cover rounded border border-slate-200 flex-shrink-0"
+                        onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                      />
+                    ) : null}
                     <div>
                       {!isEditing ? (
                         <>
@@ -1912,6 +1965,41 @@ ${stockText}
                       placeholder="Fitment e.g. 2019 Escape"
                     />
                   )}
+                  {/* Item image — preview thumbnail in edit mode, editor when adding */}
+                  {isEditing ? (
+                    <div className="flex items-center gap-2">
+                      {editForm.image ? (
+                        <img src={editForm.image} alt="" className="w-10 h-10 object-cover rounded border border-slate-200" />
+                      ) : null}
+                      <div>
+                        <input
+                          type="file"
+                          accept="image/*"
+                          className="input text-xs"
+                          onChange={async (e) => {
+                            const file = e.target.files && e.target.files[0];
+                            if (!file) return;
+                            try {
+                              const dataUrl = await resizeImageFile(file);
+                              setEditForm(f => ({ ...f, image: dataUrl }));
+                            } catch (err) {
+                              alert('Could not load image: ' + err.message);
+                            }
+                          }}
+                        />
+                        <input
+                          type="text"
+                          className="input text-xs mt-1 w-44"
+                          placeholder="…or paste an image URL"
+                          value={(editForm.image || '').startsWith('data:') ? '' : (editForm.image || '')}
+                          onChange={(e) => setEditForm(f => ({ ...f, image: e.target.value.trim() || null }))}
+                        />
+                        {editForm.image ? (
+                          <button type="button" className="text-xs text-danger block mt-1" onClick={() => setEditForm(f => ({ ...f, image: null }))}>Remove image</button>
+                        ) : null}
+                      </div>
+                    </div>
+                  ) : null}
                   <span className={`badge badge-${
                     tire.season === 'Winter' ? 'blue' :
                     tire.season === 'All-Season' ? 'green' :

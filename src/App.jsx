@@ -34,6 +34,8 @@ export default function App() {
     distributors,
     addDistributor,
     removeDistributor,
+    installServiceRates,
+    setInstallServiceRates,
   } = useTireData();
 
   return (

@@ -798,6 +798,8 @@ export function useTireData() {
     getDistributorName,
     distributors: getAllDistributors(),
     addDistributor,
+    installServiceRates,
+    setInstallServiceRates,
     removeDistributor,
     exportData,
     importData,
