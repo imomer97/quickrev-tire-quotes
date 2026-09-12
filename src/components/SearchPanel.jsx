@@ -3,7 +3,7 @@ import { resizeImageFile } from '../utils/imageResize';
 import {
   Search, Download, Check, X, Pencil, Trash2, ChevronDown,
   FileText, CheckSquare, Square, Filter, ArrowUpDown,
-  Car, Wrench, Info, Plus, GripVertical, ListOrdered, Eye
+  Car, Wrench, Info, Plus, GripVertical, ListOrdered, Eye, Mail
 } from 'lucide-react';
 import {
   DISTRIBUTORS,
@@ -100,6 +100,8 @@ export default function SearchPanel({ tires, updateTire, deleteTire, addTire, bu
   const [pdfLandscape, setPdfLandscape] = useState(false);
   const [pdfBw, setPdfBw] = useState(false);
   const [pdfPreviewUrl, setPdfPreviewUrl] = useState(null);
+  // True while jsPDF renders — it blocks the main thread, so the UI shows a spinner.
+  const [pdfGenerating, setPdfGenerating] = useState(false);
   // PDF-only field: the size shown on the generated quote (independent of the search box)
   const [pdfTireSize, setPdfTireSize] = useState('');
   // Number of the purchased tires that will actually be installed (e.g. buy 4, install 2)
@@ -840,7 +842,45 @@ export default function SearchPanel({ tires, updateTire, deleteTire, addTire, bu
 
   const handleGeneratePDF = () => {
     if (!checkPdfReady()) return;
-    generateOptionsPDF(buildPdfOptions());
+    setPdfGenerating(true);
+    // Let the spinner paint before the synchronous jsPDF render blocks the thread.
+    setTimeout(() => {
+      try {
+        generateOptionsPDF(buildPdfOptions());
+      } finally {
+        setPdfGenerating(false);
+      }
+    }, 50);
+  };
+
+  // Email the quote: generate the PDF and open a mail draft with it attached
+  // (via a local file download the user drags in when their mail client can't
+  // auto-attach; the mailto link carries subject + a plain-text summary).
+  const handleEmailQuote = () => {
+    if (!checkPdfReady()) return;
+    setPdfGenerating(true);
+    setTimeout(() => {
+      try {
+        const opts = buildPdfOptions();
+        const doc = generateOptionsPDF({ ...opts, previewOnly: true });
+        const blob = doc.output('blob');
+        const filename = `QuickRev-Quote-${(customerName || 'customer').replace(/[^a-z0-9]+/gi, '-')}.pdf`;
+        // Download the PDF so the user can attach it (browsers cannot attach files to mailto drafts).
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+        // Open the mail draft with subject and body pre-filled.
+        const subject = `Your QuickRev Quote${customerName ? ` for ${customerName}` : ''}`;
+        const body = `Hello${customerName ? ` ${customerName}` : ''},\n\nPlease find attached your quote (${filename}).\n\nAny questions, just reply to this email.\n\n— QuickRev\nquickrev.ca`;
+        window.location.href = `mailto:?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+      } finally {
+        setPdfGenerating(false);
+      }
+    }, 50);
   };
 
   // Live preview: render the exact PDF into an in-app iframe via a blob URL.
@@ -1308,6 +1348,10 @@ ${stockText}
               <Eye className="w-4 h-4" />
               Preview
             </button>
+            <button className="btn btn-ghost" onClick={handleEmailQuote} disabled={quoteItems.length === 0} title="Download the PDF and open an email draft for the customer — attach the downloaded file">
+              <Mail className="w-4 h-4" />
+              Email
+            </button>
             <button className="btn btn-primary" onClick={handleGeneratePDF} disabled={quoteItems.length === 0}>
               <Download className="w-4 h-4" />
               PDF ({quoteItems.length})
@@ -1315,6 +1359,14 @@ ${stockText}
           </div>
         </div>
       </div>
+
+      {/* === PDF GENERATING SPINNER === */}
+      {pdfGenerating && (
+        <div className="fixed inset-0 z-50 bg-black/40 flex flex-col items-center justify-center gap-3">
+          <div className="w-10 h-10 border-4 border-slate-200 border-t-slate-700 rounded-full animate-spin" />
+          <p className="text-sm font-medium text-white">Generating PDF…</p>
+        </div>
+      )}
 
       {/* === PDF PREVIEW MODAL === */}
       {pdfPreviewUrl && (

@@ -316,7 +316,7 @@ export function generateOptionsPDF({
         [col.brand]: { cellWidth: 22 },
         [col.size]: { cellWidth: 27 },
         [col.season]: { cellWidth: 17 },
-        [col.stock]: { cellWidth: 7 },
+        [col.stock]: { cellWidth: 11 },
         [col.price]: { cellWidth: 16 },
       }
     : showInstallCol || showPeriod
@@ -325,7 +325,7 @@ export function generateOptionsPDF({
           [col.brand]: { cellWidth: 22 },
           [col.size]: { cellWidth: 29 },
           [col.season]: { cellWidth: 18 },
-          [col.stock]: { cellWidth: 7 },
+          [col.stock]: { cellWidth: 10 },
           [col.price]: { cellWidth: 15 },
         }
       : {
@@ -333,7 +333,7 @@ export function generateOptionsPDF({
           [col.brand]: { cellWidth: 22 },
           [col.size]: { cellWidth: 27 },
           [col.season]: { cellWidth: 17 },
-          [col.stock]: { cellWidth: 9 },
+          [col.stock]: { cellWidth: 12 },
           [col.price]: { cellWidth: 17 },
         };
   if (showPeriod) columnStyles[col.period] = { cellWidth: 21 };
