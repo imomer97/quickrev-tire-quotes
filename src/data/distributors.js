@@ -278,9 +278,24 @@ export function parseWheelSize(sizeStr) {
   const s = String(sizeStr).toLowerCase().replace(/mm/g, ' ');
   const diameter = parseFloat((s.match(/(\d{1,2}(?:\.\d+)?)\s*[x×-]\s*\d/) || [])[1]);
   const width = parseFloat((s.match(/\d\s*[x×-]\s*(\d{1,2}(?:\.\d+)?)/) || [])[1]);
-  const offset = parseInt((s.match(/(?:et|off(?:set)?)\s*[-+]?\s*(\d{1,3})/) || [])[1], 10);
-  const bolt = (s.match(/(\d\s*[x×]\s*\d{2,3}(?:\.\d+)?)/) || [])[1];
-  if (!diameter && !width && !offset && !bolt) return null;
+  // Offset: explicit "ET39"/"offset 39", or a standalone 1-3 digit group (the
+  // legacy format "22X9.5 40 6X132 74.5MM" puts the bare offset after the
+  // diameter×width). Only when no et/offset keyword exists, take the first
+  // standalone number ≥ 3 chars after the size — values like 67.10 (hub bore)
+  // or 114.3 (bolt circle) are decimals > 3 digits or have a dot, so they don't
+  // match. Number.isFinite guards NaN so a missing offset never renders "ETNaN".
+  let offset = null;
+  const offsetMatch = s.match(/(?:et|off(?:set)?)\s*[-+]?\s*(\d{1,3}(?:\.\d+)?)/);
+  if (offsetMatch) {
+    offset = parseFloat(offsetMatch[1]);
+  } else {
+    const bare = s.match(/(?:^|\s)(\d{1,3})(?=\s|$)/);
+    if (bare) offset = parseInt(bare[1], 10);
+  }
+  const bolt = (s.match(/(\d\s*[x×]\s*\d{2,3}(?:\.\d+)?)/) || [])[1]
+    // Also accept bolt patterns written with a dash: "5-114.3"
+    || (s.match(/\b(\d\s*-\s*\d{2,3}(?:\.\d+)?)/) || [])[1];
+  if (!diameter && !width && offset == null && !bolt) return null;
   return { diameter, width, offset, boltPattern: bolt };
 }
 
@@ -337,7 +352,7 @@ export function formatSize(sizeStr, item) {
     if (w.diameter != null && w.width != null) parts.push(`${w.diameter}×${w.width}`);
     else if (w.diameter != null) parts.push(String(w.diameter));
     else if (w.width != null) parts.push(String(w.width));
-    if (w.offset != null) parts.push(`ET${w.offset}`);
+    if (w.offset != null && Number.isFinite(w.offset)) parts.push(`ET${w.offset}`);
     if (w.boltPattern) parts.push(w.boltPattern);
     return parts.join(' ').toUpperCase();
   }

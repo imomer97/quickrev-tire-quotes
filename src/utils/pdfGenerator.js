@@ -227,7 +227,7 @@ export function generateOptionsPDF({
         if (w.boltPattern) lines.push(String(w.boltPattern).toUpperCase());
         const dims = [w.diameter != null ? w.diameter : null, w.width != null ? w.width : null].filter(v => v != null);
         if (dims.length) lines.push(dims.join('×'));
-        if (w.offset != null) lines.push(`ET${w.offset}`);
+        if (w.offset != null && Number.isFinite(w.offset)) lines.push(`ET${w.offset}`);
         sizeCell = lines.join('\n');
       }
     } else if (cat === 'part' && tire.fitment) {
