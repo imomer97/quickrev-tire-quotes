@@ -125,7 +125,7 @@ import {
 import { generateOptionsPDF } from '../utils/pdfGenerator.js';
 import { useQuoteHistory, loadEmailTemplate, saveEmailTemplate, renderEmailTemplate, DEFAULT_EMAIL_TEMPLATE } from '../hooks/useQuoteHistory.js';
 
-export default function SearchPanel({ tires, updateTire, deleteTire, addTire, bulkUpdateTires, warehouseLocations, distributors, onAddDistributor }) {
+export default function SearchPanel({ tires, updateTire, deleteTire, addTire, bulkUpdateTires, warehouseLocations, distributors, onAddDistributor, preload, onPreloadConsumed }) {
   // === SEARCH & FILTERS ===
   const [searchSize, setSearchSize] = useState('');
   const [quantity, setQuantity] = useState(4);
@@ -186,6 +186,10 @@ export default function SearchPanel({ tires, updateTire, deleteTire, addTire, bu
   const [vehicleType, setVehicleType] = useState('');
   const [buyFromQuickRev, setBuyFromQuickRev] = useState(true);
   const [customerName, setCustomerName] = useState('');
+  // Customer email used by the email modal by default (preloaded or typed).
+  const [customerEmail, setCustomerEmail] = useState('');
+  // Preloaded customer details from the Customers tab (name/email/vehicle/postal).
+  const [preloadedCustomer, setPreloadedCustomer] = useState(null);
   // Opt-in totals block on the PDF: subtotal / HST / grand total after the notes.
   const [showPdfTotals, setShowPdfTotals] = useState(false);
   const [pdfLandscape, setPdfLandscape] = useState(false);
@@ -250,6 +254,24 @@ export default function SearchPanel({ tires, updateTire, deleteTire, addTire, bu
   useEffect(() => {
     setVisibleCount(100);
   }, [searchSize, activeDistributors, activeTiers, activeSeasons]);
+  // === CUSTOMER PRELOAD (from the Customers tab) ===
+  // Fill name, email, vehicle, tire size, and postal code into a new quote.
+  useEffect(() => {
+    if (!preload) return;
+    if (preload.customerName != null) setCustomerName(preload.customerName);
+    if (preload.email != null) setCustomerEmail(preload.email);
+    if (preload.vehicleType && VEHICLE_LABELS[preload.vehicleType.toLowerCase()]) setVehicleType(preload.vehicleType.toLowerCase());
+    else if (preload.vehicle) {
+      // Map vehicle text (e.g. "Toyota Sienna") onto a vehicle type if possible.
+      const v = preload.vehicle.toLowerCase();
+      const match = Object.entries(VEHICLE_LABELS).find(([, label]) => v.includes(label.toLowerCase().split(' ')[0]));
+      if (match) setVehicleType(match[0]);
+    }
+    if (preload.tireSize) setPdfTireSize(preload.tireSize);
+    if (preload.postalCode) setPostalCode(preload.postalCode);
+    setPreloadedCustomer(preload);
+    if (onPreloadConsumed) onPreloadConsumed();
+  }, [preload]);
   // === BULK EDIT ===
   const [showBulkEdit, setShowBulkEdit] = useState(false);
   const [bulkMsg, setBulkMsg] = useState(null);
@@ -1019,7 +1041,7 @@ export default function SearchPanel({ tires, updateTire, deleteTire, addTire, bu
         });
         setEmailResult(null);
         setEmailSourceId(snapshot.id);
-        setEmailDraft({ to: '', subject: `Your QuickRev Quote${customerName ? ` for ${customerName}` : ''}`, body, pdfBase64: base64, filename });
+        setEmailDraft({ to: customerEmail, subject: `Your QuickRev Quote${customerName ? ` for ${customerName}` : ''}`, body, pdfBase64: base64, filename });
         setShowEmailModal(true);
       } finally {
         setPdfGenerating(false);
@@ -1620,6 +1642,18 @@ ${stockText}
               className="input flex-1 min-w-48"
               placeholder="Customer name (optional)"
             />
+            {preloadedCustomer && (
+              <div className="flex items-center gap-2 text-xs bg-blue-50 border border-blue-200 rounded-lg px-3 py-1.5" title={`Preloaded from the Customers tab${preloadedCustomer.notes ? ` — Notes: ${preloadedCustomer.notes}` : ''}`}>
+                <Car className="w-3.5 h-3.5 text-blue-600 shrink-0" />
+                <span className="truncate max-w-72">
+                  <strong>{preloadedCustomer.customerName || 'Customer'}</strong>
+                  {preloadedCustomer.vehicle ? ` · ${preloadedCustomer.vehicle}` : ''}
+                  {preloadedCustomer.tireSize ? ` · ${preloadedCustomer.tireSize}` : ''}
+                  {preloadedCustomer.postalCode ? ` · ${preloadedCustomer.postalCode}` : ''}
+                </span>
+                <button className="text-blue-600 hover:text-blue-800 shrink-0" onClick={() => setPreloadedCustomer(null)} title="Dismiss">✕</button>
+              </div>
+            )}
             <button className="btn btn-ghost" onClick={handlePreviewPDF} disabled={quoteItems.length === 0} title="See the exact PDF in-app before downloading">
               <Eye className="w-4 h-4" />
               Preview

@@ -8,6 +8,9 @@ import { useQuoteHistory } from './hooks/useQuoteHistory.js';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState('search');
+  // Preload payload passed from the Customers tab into a new quote (customer
+  // clicked → name/email/vehicle/postal land in the Search & Quote fields).
+  const [quotePreload, setQuotePreload] = useState(null);
   // Quote history is shared with the Customers tab; loaded once here and
   // passed down so both views show the same data.
   const { quotes: quoteHistory, refresh: refreshQuoteHistory } = useQuoteHistory();
@@ -67,10 +70,12 @@ export default function App() {
             lastSyncAt={lastSyncAt}
             distributors={distributors}
             onAddDistributor={addDistributor}
+            preload={quotePreload}
+            onPreloadConsumed={() => setQuotePreload(null)}
           />
         )}
         {activeTab === 'customers' && (
-          <CustomersPage quotes={quoteHistory} refreshQuoteHistory={refreshQuoteHistory} />
+          <CustomersPage quotes={quoteHistory} refreshQuoteHistory={refreshQuoteHistory} onQuoteForCustomer={(payload) => { setQuotePreload(payload); setActiveTab('search'); }} />
         )}
         {activeTab === 'import' && (
           <ImportPanel

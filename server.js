@@ -119,7 +119,7 @@ function requireSyncKey(req, res, next) {
   next();
 }
 
-const EMPTY_SYNC = { manualTires: [], overrides: {}, deletedKeys: [], warehouseLocations: [], customDistributors: [], installServiceRates: {}, quoteHistory: [] };
+const EMPTY_SYNC = { manualTires: [], overrides: {}, deletedKeys: [], warehouseLocations: [], customDistributors: [], installServiceRates: {}, quoteHistory: [], customers: {} };
 
 // === QUOTE HISTORY ===
 // Every generated quote is saved (items, totals, options, customer) so past
@@ -158,6 +158,125 @@ app.delete('/api/quote-history/:id', requireSyncKey, async (req, res) => {
     await store.write(data);
     res.json({ success: true });
   } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// === CUSTOMER RECORDS ===
+// Per-customer notes, contact details, and Calendly-derived info (vehicle,
+// address, phone). Keyed by lowercase email-or-name so they merge with the
+// history aggregation on the client.
+app.get('/api/customers', requireSyncKey, async (req, res) => {
+  try {
+    const data = await store.read();
+    res.json({ success: true, customers: (data && data.customers && typeof data.customers === 'object') ? data.customers : {} });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.put('/api/customers/:key', requireSyncKey, async (req, res) => {
+  try {
+    const key = String(req.params.key || '').toLowerCase().trim();
+    if (!key) return res.status(400).json({ success: false, error: 'Missing customer key.' });
+    const patch = req.body || {};
+    const data = (await store.read()) || { ...EMPTY_SYNC };
+    const customers = (data.customers && typeof data.customers === 'object') ? data.customers : {};
+    const existing = customers[key] || {};
+    customers[key] = { ...existing, ...patch, updatedAt: new Date().toISOString() };
+    data.customers = customers;
+    await store.write(data);
+    res.json({ success: true, customer: customers[key] });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// === CALENDLY SYNC ===
+// Pulls scheduled events + invitee Q&A from the Calendly API (personal access
+// token in CALENDLY_TOKEN) and enriches customer records with vehicle,
+// address, phone, and email details — the same parsing approach as the
+// QuickRev messaging app. Merges by email (or name) into /api/customers.
+function parseCalendlyAnswers(qas) {
+  const out = { vehicle: '', tireSize: '', address: '', phone: '' };
+  const textOf = (a) => String((a && (a.answer || a.value)) || '').trim();
+  const labelOf = (a) => String((a && (a.question || a.label)) || '').toLowerCase();
+  const joined = qas.map(textOf).join(' | ');
+  for (const a of qas) {
+    const label = labelOf(a);
+    const text = textOf(a);
+    if (!text) continue;
+    if (!out.tireSize && /tire.*(size|width)|rim|wheel size/.test(label)) {
+      const m = text.match(/\b\d{3}\s*[/ ]\s*\d{2}\s*[/ ]\s*\d{2}\b/) || text.match(/\b(\d{2}(?:\.\d)?)[xX\s]+(\d{1,2}(?:\.\d)?)\b/);
+      if (m) out.tireSize = m[0];
+    }
+    if (!out.vehicle && /(vehicle|car|make|model|year of|what.*driving)/.test(label)) out.vehicle = text;
+    if (!out.address && /(address|street|where.*(deliver|install)|city)/.test(label) && /\d|\b(st|street|ave|avenue|rd|road|dr|drive|cres|court|blvd|lane|way|unit)\b/i.test(text)) out.address = text;
+    if (!out.phone && /(phone|mobile|cell|contact number)/.test(label)) out.phone = text.replace(/[^0-9+()\-\s]/g, '').trim();
+  }
+  // Free-text fallback for vehicles: year + make/model pattern.
+  if (!out.vehicle) {
+    const m = joined.match(/\b(19|20)\d{2}\s+[A-Za-z][A-Za-z0-9]*(?:\s+[A-Za-z0-9]+){0,3}/);
+    if (m) out.vehicle = m[0];
+  }
+  return out;
+}
+
+app.post('/api/calendly-sync', requireSyncKey, async (req, res) => {
+  const token = process.env.CALENDLY_TOKEN;
+  if (!token) {
+    return res.status(501).json({ success: false, error: 'CALENDLY_TOKEN is not set on the server. Add it in the Render environment settings (Calendly → Integrations → API & Webhooks → Personal access token), then redeploy.' });
+  }
+  const headers = { Authorization: `Bearer ${token}` };
+  const H = (u) => fetch(u, { headers });
+  try {
+    const me = await (await H('https://api.calendly.com/users/me')).json();
+    if (!me || !me.resource) return res.status(502).json({ success: false, error: 'Calendly rejected the token.', detail: me });
+    const userUri = me.resource.uri;
+    // Page through the most recent scheduled events (invitees only — completed or active).
+    const events = [];
+    let eventsUrl = `https://api.calendly.com/scheduled_events?user=${encodeURIComponent(userUri)}&count=100&sort=start_time:desc`;
+    for (let page = 0; page < 5 && eventsUrl; page++) {
+      const r = await (await H(eventsUrl)).json();
+      events.push(...(r.collection || []));
+      eventsUrl = r.pagination && r.pagination.next_page_url;
+    }
+    const data = (await store.read()) || { ...EMPTY_SYNC };
+    const customers = (data.customers && typeof data.customers === 'object') ? data.customers : {};
+    let fetched = 0, updated = 0;
+    for (const ev of events) {
+      if (ev.status === 'canceled') continue;
+      const invRes = await (await H(`${ev.uri}/invitees`)).json();
+      for (const inv of (invRes.collection || [])) {
+        fetched++;
+        const email = String(inv.email || '').toLowerCase().trim();
+        const name = String(inv.name || '').trim();
+        const key = email || name.toLowerCase();
+        if (!key) continue;
+        const parsed = parseCalendlyAnswers(inv.questions_and_answers || []);
+        const rec = customers[key] || {};
+        customers[key] = {
+          ...rec,
+          key,
+          name: name || rec.name || '',
+          email: email || rec.email || '',
+          phone: parsed.phone || rec.phone || '',
+          vehicle: parsed.vehicle || rec.vehicle || '',
+          tireSize: parsed.tireSize || rec.tireSize || '',
+          address: parsed.address || rec.address || '',
+          calendlyEvent: ev.name || rec.calendlyEvent || '',
+          calendlyEventTime: ev.start_time || rec.calendlyEventTime || '',
+          calendlySyncedAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        };
+        updated++;
+      }
+    }
+    data.customers = customers;
+    await store.write(data);
+    res.json({ success: true, events: events.length, invitees: fetched, customersUpdated: updated });
+  } catch (err) {
+    console.error('calendly-sync failed:', err.message);
     res.status(500).json({ success: false, error: err.message });
   }
 });
@@ -317,6 +436,7 @@ app.put('/api/sync-data', requireSyncKey, async (req, res) => {
       // Quote history lives only in its own endpoints — never let a catalog
       // sync push (which doesn't carry it) overwrite it.
       quoteHistory: (prev && Array.isArray(prev.quoteHistory)) ? prev.quoteHistory : [],
+      customers: (prev && prev.customers && typeof prev.customers === 'object') ? prev.customers : {},
     });
     res.json({ success: true, storage: store.kind });
   } catch (err) {
