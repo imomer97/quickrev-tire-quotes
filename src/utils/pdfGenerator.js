@@ -268,10 +268,10 @@ export function generateOptionsPDF({
   // === TABLE HEADERS ===
   // First column is a one-word category tab so the customer can scan tires vs.
   // wheels/rims vs. parts at a glance. Absent/legacy items render as "Tire".
-  const tableHeaders = ['Category', 'Brand', 'Model', 'Size', 'Season', 'Qty', 'Price/Tire'];
+  const tableHeaders = ['Category', 'Brand', 'Model', 'Size', 'Season', 'Qty', 'Price/ea'];
   if (showPeriod) tableHeaders.push('Sale Period');
-  if (showInstallCol) tableHeaders.push('Install/Tire');
-  tableHeaders.push('HST (14%)', 'Total');
+  if (showInstallCol) tableHeaders.push('Install/ea');
+  tableHeaders.push('HST', 'Total');
 
   // Fixed widths keep headers / season / size / price from wrapping the text.
   // Model (index 1) auto-sizes to whatever width remains on the page.
@@ -282,21 +282,47 @@ export function generateOptionsPDF({
   col.hst = next++;
   col.total = next++;
 
-  // Fixed widths that are wide enough to keep every header (Stock, Price/Tire,
-  // Install/Tire, HST (14%), Sale Period) on a single line. Model auto-sizes to
-  // whatever width remains.
-  const columnStyles = {
-    [col.category]: { cellWidth: 18 },
-    [col.brand]: { cellWidth: 16 },
-    [col.size]: { cellWidth: 26 },
-    [col.season]: { cellWidth: 20 },
-    [col.stock]: { cellWidth: 12 },
-    [col.price]: { cellWidth: 19 },
-  };
-  if (showPeriod) columnStyles[col.period] = { cellWidth: 22 };
-  if (showInstallCol) columnStyles[col.install] = { cellWidth: 23 };
-  columnStyles[col.hst] = { cellWidth: 19 };
-  columnStyles[col.total] = { cellWidth: 19 };
+  // Fixed widths sized so every header stays on ONE line at 7.5pt bold and
+  // common body values (VREDESTEIN, All-Weather, $2,660.90) never wrap.
+  // Model auto-sizes to whatever width remains on the page.
+  // Usable width = 215.9 - 2*15 = ~186mm.
+  //
+  // Normal (no extra columns): fixed 141mm -> Model gets ~45mm.
+  // With Install/ea: fixed 161mm -> Model ~25mm.
+  // With Sale Period: fixed 162mm -> Model ~24mm.
+  // With BOTH extra columns the fixed set alone would overflow, so a compact
+  // set is used (156mm) and the body font drops to 7.5pt so long names still fit.
+  const bothExtras = showPeriod && showInstallCol;
+  const columnStyles = bothExtras
+    ? {
+        [col.category]: { cellWidth: 11 },
+        [col.brand]: { cellWidth: 22 },
+        [col.size]: { cellWidth: 15 },
+        [col.season]: { cellWidth: 17 },
+        [col.stock]: { cellWidth: 7 },
+        [col.price]: { cellWidth: 16 },
+      }
+    : showInstallCol || showPeriod
+      ? {
+          [col.category]: { cellWidth: 13 },
+          [col.brand]: { cellWidth: 22 },
+          [col.size]: { cellWidth: 21 },
+          [col.season]: { cellWidth: 18 },
+          [col.stock]: { cellWidth: 8 },
+          [col.price]: { cellWidth: 16 },
+        }
+      : {
+          [col.category]: { cellWidth: 15 },
+          [col.brand]: { cellWidth: 22 },
+          [col.size]: { cellWidth: 23 },
+          [col.season]: { cellWidth: 17 },
+          [col.stock]: { cellWidth: 9 },
+          [col.price]: { cellWidth: 17 },
+        };
+  if (showPeriod) columnStyles[col.period] = { cellWidth: 21 };
+  if (showInstallCol) columnStyles[col.install] = { cellWidth: bothExtras ? 17 : 19 };
+  columnStyles[col.hst] = { cellWidth: bothExtras ? 14 : 14 };
+  columnStyles[col.total] = { cellWidth: bothExtras ? 16 : 16 };
 
   doc.autoTable({
     startY: y,
@@ -306,15 +332,15 @@ export function generateOptionsPDF({
     headStyles: {
       fillColor: [15, 23, 42],
       textColor: [255, 255, 255],
-      fontSize: 8,
+      fontSize: 7.5,
       fontStyle: 'bold',
       halign: 'center',
       cellPadding: 1.5,
     },
     bodyStyles: {
-      fontSize: 8,
+      fontSize: bothExtras ? 7.5 : 8,
       textColor: [30, 41, 59],
-      cellPadding: 1.5,
+      cellPadding: 1.2,
     },
     alternateRowStyles: {
       fillColor: [248, 250, 252],
