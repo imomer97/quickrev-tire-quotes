@@ -3,7 +3,7 @@ import { resizeImageFile } from '../utils/imageResize';
 import {
   Search, Download, Check, X, Pencil, Trash2, ChevronDown,
   FileText, CheckSquare, Square, Filter, ArrowUpDown,
-  Car, Wrench, Info, Plus, GripVertical, ListOrdered
+  Car, Wrench, Info, Plus, GripVertical, ListOrdered, Eye
 } from 'lucide-react';
 import {
   DISTRIBUTORS,
@@ -98,6 +98,8 @@ export default function SearchPanel({ tires, updateTire, deleteTire, addTire, bu
   // Opt-in totals block on the PDF: subtotal / HST / grand total after the notes.
   const [showPdfTotals, setShowPdfTotals] = useState(false);
   const [pdfLandscape, setPdfLandscape] = useState(false);
+  const [pdfBw, setPdfBw] = useState(false);
+  const [pdfPreviewUrl, setPdfPreviewUrl] = useState(null);
   // PDF-only field: the size shown on the generated quote (independent of the search box)
   const [pdfTireSize, setPdfTireSize] = useState('');
   // Number of the purchased tires that will actually be installed (e.g. buy 4, install 2)
@@ -801,34 +803,55 @@ export default function SearchPanel({ tires, updateTire, deleteTire, addTire, bu
   };
 
   // === PDF GENERATION ===
-  const handleGeneratePDF = () => {
+  const buildPdfOptions = () => ({
+    tires: quoteItems,
+    // Per-line quantity (falls back to the global field for legacy quote items)
+    quantityFor: (item) => (item && typeof item.quoteQty === 'number' && item.quoteQty > 0) ? item.quoteQty : quantity,
+    quantity,
+    vehicleType,
+    buyFromQuickRev,
+    includeInstallation: showInstall,
+    customerName,
+    tireSize: pdfTireSize,
+    installQty,
+    postalCode,
+    travelSurcharge: showInstall ? postalInfo.surcharge : 0,
+    // Manual drag order overrides the automatic price sort in the PDF.
+    preserveOrder: manualQuoteOrder,
+    // Opt-in totals block (subtotal / HST / grand total) at the end.
+    showTotals: showPdfTotals,
+    // Landscape orientation for wide tables.
+    orientation: pdfLandscape ? 'landscape' : 'portrait',
+    // Compact black-and-white theme for shop printers.
+    theme: pdfBw ? 'bw' : 'color',
+  });
+
+  const checkPdfReady = () => {
     if (quoteItems.length === 0) {
       alert('Add at least one item to the quote first.');
-      return;
+      return false;
     }
     if (!vehicleType) {
       alert('Please select a vehicle type before generating the PDF.');
-      return;
+      return false;
     }
-    generateOptionsPDF({
-      tires: quoteItems,
-      // Per-line quantity (falls back to the global field for legacy quote items)
-      quantityFor: (item) => (item && typeof item.quoteQty === 'number' && item.quoteQty > 0) ? item.quoteQty : quantity,
-      quantity,
-      vehicleType,
-      buyFromQuickRev,
-      includeInstallation: showInstall,
-      customerName,
-      tireSize: pdfTireSize,
-      installQty,
-      postalCode,
-      travelSurcharge: showInstall ? postalInfo.surcharge : 0,
-      // Manual drag order overrides the automatic price sort in the PDF.
-      preserveOrder: manualQuoteOrder,
-      // Opt-in totals block (subtotal / HST / grand total) at the end.
-      showTotals: showPdfTotals,
-      // Landscape orientation for wide tables.
-      orientation: pdfLandscape ? 'landscape' : 'portrait',
+    return true;
+  };
+
+  const handleGeneratePDF = () => {
+    if (!checkPdfReady()) return;
+    generateOptionsPDF(buildPdfOptions());
+  };
+
+  // Live preview: render the exact PDF into an in-app iframe via a blob URL.
+  // Revoke the previous URL so blobs don't accumulate.
+  const handlePreviewPDF = () => {
+    if (!checkPdfReady()) return;
+    const doc = generateOptionsPDF({ ...buildPdfOptions(), previewOnly: true });
+    const url = doc.output('bloburl');
+    setPdfPreviewUrl((prev) => {
+      if (prev) URL.revokeObjectURL(prev);
+      return url;
     });
   };
 
@@ -1266,6 +1289,14 @@ ${stockText}
               />
               <span className="text-sm font-medium">Landscape PDF</span>
             </label>
+            <label className="flex items-center gap-2 cursor-pointer" title="Compact black-and-white theme — no fills or color, prints cleanly on shop printers">
+              <input
+                type="checkbox"
+                checked={pdfBw}
+                onChange={(e) => setPdfBw(e.target.checked)}
+              />
+              <span className="text-sm font-medium">B&W print</span>
+            </label>
             <input
               type="text"
               className="input flex-1 min-w-48"
@@ -1273,6 +1304,10 @@ ${stockText}
               value={customerName}
               onChange={(e) => setCustomerName(e.target.value)}
             />
+            <button className="btn btn-ghost" onClick={handlePreviewPDF} disabled={quoteItems.length === 0} title="See the exact PDF in-app before downloading">
+              <Eye className="w-4 h-4" />
+              Preview
+            </button>
             <button className="btn btn-primary" onClick={handleGeneratePDF} disabled={quoteItems.length === 0}>
               <Download className="w-4 h-4" />
               PDF ({quoteItems.length})
@@ -1280,6 +1315,40 @@ ${stockText}
           </div>
         </div>
       </div>
+
+      {/* === PDF PREVIEW MODAL === */}
+      {pdfPreviewUrl && (
+        <div
+          className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4"
+          onClick={() => setPdfPreviewUrl(null)}
+        >
+          <div
+            className="bg-white rounded-xl shadow-2xl w-full max-w-5xl flex flex-col overflow-hidden"
+            style={{ height: '90vh' }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between px-4 py-2 border-b border-slate-200">
+              <h3 className="font-semibold text-sm">PDF Preview — exactly what the customer will receive</h3>
+              <div className="flex items-center gap-2">
+                <button
+                  className="btn btn-sm btn-primary"
+                  onClick={() => {
+                    handleGeneratePDF();
+                    setPdfPreviewUrl(null);
+                  }}
+                >
+                  <Download className="w-4 h-4" />
+                  Download
+                </button>
+                <button className="btn btn-sm btn-ghost" onClick={() => setPdfPreviewUrl(null)} title="Close preview">
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+            <iframe src={pdfPreviewUrl} title="PDF preview" className="flex-1 w-full" />
+          </div>
+        </div>
+      )}
 
       {/* === QUOTE PANEL (persistent across searches) === */}
       <div className="card p-4">

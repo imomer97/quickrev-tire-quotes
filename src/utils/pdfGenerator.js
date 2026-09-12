@@ -57,12 +57,23 @@ export function generateOptionsPDF({
   // extra width — useful for quotes with both the Install and Sale Period
   // columns or very long model names.
   orientation = 'portrait',
+  // 'color' (default) or 'bw'. B&W is a compact print-friendly theme for shop
+  // printers: no fills, plain black rules, thinner rows.
+  theme = 'color',
+  // When true, return the jsPDF doc instead of triggering a download — used by
+  // the live preview modal (doc.output('bloburl') renders in an <iframe>).
+  previewOnly = false,
 }) {
   const doc = new jsPDF({ unit: 'mm', format: 'letter', orientation: orientation === 'landscape' ? 'landscape' : 'portrait' });
   const pageWidth = doc.internal.pageSize.getWidth();
   const pageHeight = doc.internal.pageSize.getHeight();
   const margin = 15;
   let y = 20;
+  const bw = theme === 'bw';
+  // Grayscale approximations used by the B&W theme (all print cleanly).
+  const C = bw
+    ? { headerBg: null, headerText: [0, 0, 0], bodyText: [0, 0, 0], altRow: null, border: [120, 120, 120], muted: [90, 90, 90], disclaimerBg: null, disclaimerText: [0, 0, 0], accent: [0, 0, 0] }
+    : { headerBg: [15, 23, 42], headerText: [255, 255, 255], bodyText: [30, 41, 59], altRow: [248, 250, 252], border: [203, 213, 225], muted: [148, 163, 184], disclaimerBg: [254, 252, 232], disclaimerText: [180, 83, 9], accent: [15, 23, 42] };
 
   // === HEADER ===
   // White header matching the app's white top bar: red QuickRev wordmark on a
@@ -76,20 +87,20 @@ export function generateOptionsPDF({
   const logoW = (lw / lh) * logoH;
   doc.addImage(quickrevLogo, 'PNG', margin, (35 - logoH) / 2, logoW, logoH);
 
-  doc.setTextColor(15, 23, 42);
+  doc.setTextColor(...C.headerText);
   doc.setFontSize(10);
   doc.setFont('helvetica', 'normal');
   doc.text('Product Options & Estimated Costs', margin, 26);
   doc.text('quickrev.ca', pageWidth - margin, 26, { align: 'right' });
 
-  doc.setDrawColor(226, 232, 240);
+  doc.setDrawColor(...(bw ? C.border : [226, 232, 240]));
   doc.setLineWidth(0.5);
   doc.line(margin, 35, pageWidth - margin, 35);
 
   y = 42;
 
   // === CUSTOMER INFO ===
-  doc.setTextColor(30, 41, 59);
+  doc.setTextColor(...C.bodyText);
   doc.setFontSize(11);
   doc.setFont('helvetica', 'bold');
   doc.text('Customer:', margin, y);
@@ -140,9 +151,11 @@ export function generateOptionsPDF({
   y += 10;
 
   // === DISCLAIMER ===
-  doc.setFillColor(254, 252, 232);
-  doc.roundedRect(margin, y - 4, pageWidth - margin * 2, 10, 2, 2, 'F');
-  doc.setTextColor(180, 83, 9);
+  if (C.disclaimerBg) {
+    doc.setFillColor(...C.disclaimerBg);
+    doc.roundedRect(margin, y - 4, pageWidth - margin * 2, 10, 2, 2, 'F');
+  }
+  doc.setTextColor(...C.disclaimerText);
   doc.setFontSize(8);
   doc.text('This document shows estimated costs for available product options (tires, wheels/rims, and auto parts). Prices are subject to change. Not an invoice.', margin + 3, y + 2);
   y += 14;
@@ -334,21 +347,25 @@ export function generateOptionsPDF({
     body: rows,
     theme: 'grid',
     headStyles: {
-      fillColor: [15, 23, 42],
-      textColor: [255, 255, 255],
+      fillColor: C.headerBg || false,
+      textColor: C.headerText,
       fontSize: 7.5,
       fontStyle: 'bold',
       halign: 'center',
       cellPadding: 1.5,
+      lineWidth: bw ? 0.2 : 0.1,
+      lineColor: C.border,
     },
     bodyStyles: {
       fontSize: bothExtras ? 7.5 : 8,
-      textColor: [30, 41, 59],
+      textColor: C.bodyText,
       cellPadding: 1.2,
+      lineWidth: bw ? 0.2 : 0.1,
+      lineColor: C.border,
     },
-    alternateRowStyles: {
-      fillColor: [248, 250, 252],
-    },
+    alternateRowStyles: C.altRow
+      ? { fillColor: C.altRow }
+      : {},
     columnStyles,
     didParseCell(hookData) {
       const cell = hookData && hookData.cell;
@@ -356,7 +373,8 @@ export function generateOptionsPDF({
       const section = hookData ? hookData.section : undefined;
       if (section === 'body' && colIdx === col.category) {
         // One-word category tab in the first column: tire=black, wheel=blue,
-        // part=orange.
+        // part=orange. B&W theme keeps everything plain black.
+        if (bw) { cell.textColor = [0, 0, 0]; return; }
         const cat = String(cell.raw || '').toLowerCase();
         if (cat === 'wheel') cell.textColor = [32, 86, 185];
         else if (cat === 'part') cell.textColor = [214, 80, 41];
@@ -375,7 +393,7 @@ export function generateOptionsPDF({
   // below (and a short bullet in the notes) to stay factual and low-key.
   const pageLimit = pageHeight - 47; // keep notes above the footer
   if (y < pageLimit) {
-    doc.setTextColor(30, 41, 59);
+    doc.setTextColor(...C.bodyText);
     doc.setFontSize(8);
     doc.setFont('helvetica', 'bold');
     doc.text('Pricing Breakdown:', margin, y);
@@ -397,7 +415,7 @@ export function generateOptionsPDF({
 
   // === PRICING NOTES ===
   if (y < pageHeight - 37) {
-    doc.setTextColor(30, 41, 59);
+    doc.setTextColor(...C.bodyText);
     doc.setFontSize(9);
     doc.setFont('helvetica', 'bold');
     doc.text('Pricing Notes:', margin, y);
@@ -475,7 +493,7 @@ export function generateOptionsPDF({
   // a single combined number across options would be misleading.
   if (showTotals) {
     if (y > pageHeight - 40) { doc.addPage(); y = 20; }
-    doc.setDrawColor(226, 232, 240);
+    doc.setDrawColor(...C.border);
     doc.setLineWidth(0.5);
     doc.line(margin, y, pageWidth - margin, y);
     y += 6;
@@ -494,7 +512,7 @@ export function generateOptionsPDF({
     const line = (label, value, bold = false) => {
       doc.setFont('helvetica', bold ? 'bold' : 'normal');
       doc.setFontSize(bold ? 11 : 9);
-      doc.setTextColor(30, 41, 59);
+      doc.setTextColor(...C.bodyText);
       doc.text(label, margin, y);
       doc.text(value, pageWidth - margin, y, { align: 'right' });
       y += bold ? 7 : 5;
@@ -503,21 +521,25 @@ export function generateOptionsPDF({
     line('Subtotal (pre-tax)', formatCurrency(subtotalPreTax));
     line('HST (14%)', formatCurrency(subtotalHST));
     if (travelSurcharge > 0) line('Travel surcharge (per job)', formatCurrency(travelSurcharge));
-    doc.setDrawColor(148, 163, 184);
+    doc.setDrawColor(...(bw ? [0, 0, 0] : C.muted));
     doc.line(margin, y - 2, pageWidth - margin, y - 2);
     y += 2;
     line('Grand Total', formatCurrency(grand), true);
   }
 
   // === FOOTER ===
-  doc.setTextColor(148, 163, 184);
+  doc.setTextColor(...C.muted);
   doc.setFontSize(8);
   const footerY = pageHeight - 12;
   doc.text(`Generated ${new Date().toLocaleString()}`, margin, footerY);
   doc.text('QuickRev Inc. | quickrev.ca', pageWidth - margin, footerY, { align: 'right' });
 
-  // Save
+  // Save (or return the doc for live preview)
   const sizeLabel = (tireSize || 'quote').replace(/[^0-9a-zA-Z-]/g, '-');
   const filename = `QuickRev-Options-${sizeLabel}-${new Date().toISOString().slice(0, 10)}.pdf`;
+  if (previewOnly) {
+    doc.__filename = filename;
+    return doc;
+  }
   doc.save(filename);
 }
