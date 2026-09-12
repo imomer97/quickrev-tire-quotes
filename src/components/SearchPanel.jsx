@@ -97,6 +97,7 @@ export default function SearchPanel({ tires, updateTire, deleteTire, addTire, bu
   const [customerName, setCustomerName] = useState('');
   // Opt-in totals block on the PDF: subtotal / HST / grand total after the notes.
   const [showPdfTotals, setShowPdfTotals] = useState(false);
+  const [pdfLandscape, setPdfLandscape] = useState(false);
   // PDF-only field: the size shown on the generated quote (independent of the search box)
   const [pdfTireSize, setPdfTireSize] = useState('');
   // Number of the purchased tires that will actually be installed (e.g. buy 4, install 2)
@@ -826,6 +827,8 @@ export default function SearchPanel({ tires, updateTire, deleteTire, addTire, bu
       preserveOrder: manualQuoteOrder,
       // Opt-in totals block (subtotal / HST / grand total) at the end.
       showTotals: showPdfTotals,
+      // Landscape orientation for wide tables.
+      orientation: pdfLandscape ? 'landscape' : 'portrait',
     });
   };
 
@@ -1254,6 +1257,14 @@ ${stockText}
                 onChange={(e) => setShowPdfTotals(e.target.checked)}
               />
               <span className="text-sm font-medium">Show totals on PDF</span>
+            </label>
+            <label className="flex items-center gap-2 cursor-pointer" title="Generate the PDF in landscape orientation — extra table width for long model names and wide quotes">
+              <input
+                type="checkbox"
+                checked={pdfLandscape}
+                onChange={(e) => setPdfLandscape(e.target.checked)}
+              />
+              <span className="text-sm font-medium">Landscape PDF</span>
             </label>
             <input
               type="text"

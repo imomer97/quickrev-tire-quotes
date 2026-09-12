@@ -53,9 +53,14 @@ export function generateOptionsPDF({
   // When true, append a totals block after the pricing notes: pre-tax subtotal,
   // HST, travel surcharge (if any), and the quote grand total.
   showTotals = false,
+  // 'portrait' (default) or 'landscape'. Landscape gives the table ~92mm of
+  // extra width — useful for quotes with both the Install and Sale Period
+  // columns or very long model names.
+  orientation = 'portrait',
 }) {
-  const doc = new jsPDF({ unit: 'mm', format: 'letter' });
+  const doc = new jsPDF({ unit: 'mm', format: 'letter', orientation: orientation === 'landscape' ? 'landscape' : 'portrait' });
   const pageWidth = doc.internal.pageSize.getWidth();
+  const pageHeight = doc.internal.pageSize.getHeight();
   const margin = 15;
   let y = 20;
 
@@ -218,23 +223,22 @@ export function generateOptionsPDF({
       pendingSaleRows.push({ label: `${tire.brand} ${tire.model} (${tire.size})`, sale });
     }
 
-    // Size cell: for wheels, split the spec onto a second line — bolt pattern
-    // and offset are the details a customer needs to verify fitment. Parts keep
-    // their fitment note if one is set.
+    // Size cell: for wheels, one compact line — diameter×width, offset, bolt
+    // pattern (e.g. "17×7 ET39 5-114.3"). Parts keep their fitment note.
     let sizeCell = tire.size;
     const cat = tire.category || 'tire';
     if (cat === 'wheel') {
       const w = parseWheelSize(tire.size);
       if (w && (w.boltPattern || w.diameter != null)) {
-        const lines = [];
-        if (w.boltPattern) lines.push(String(w.boltPattern).toUpperCase());
+        const parts = [];
         const dims = [w.diameter != null ? w.diameter : null, w.width != null ? w.width : null].filter(v => v != null);
-        if (dims.length) lines.push(dims.join('×'));
-        if (w.offset != null && Number.isFinite(w.offset)) lines.push(`ET${w.offset}`);
-        sizeCell = lines.join('\n');
+        if (dims.length) parts.push(dims.join('×'));
+        if (w.offset != null && Number.isFinite(w.offset)) parts.push(`ET${w.offset}`);
+        if (w.boltPattern) parts.push(String(w.boltPattern).toUpperCase());
+        if (parts.length) sizeCell = parts.join(' ');
       }
     } else if (cat === 'part' && tire.fitment) {
-      sizeCell = `${tire.size}\nFits: ${tire.fitment}`;
+      sizeCell = `${tire.size} · Fits: ${tire.fitment}`;
     }
 
     const row = [
@@ -297,24 +301,24 @@ export function generateOptionsPDF({
     ? {
         [col.category]: { cellWidth: 11 },
         [col.brand]: { cellWidth: 22 },
-        [col.size]: { cellWidth: 15 },
+        [col.size]: { cellWidth: 27 },
         [col.season]: { cellWidth: 17 },
         [col.stock]: { cellWidth: 7 },
         [col.price]: { cellWidth: 16 },
       }
     : showInstallCol || showPeriod
       ? {
-          [col.category]: { cellWidth: 13 },
+          [col.category]: { cellWidth: 10 },
           [col.brand]: { cellWidth: 22 },
-          [col.size]: { cellWidth: 21 },
+          [col.size]: { cellWidth: 29 },
           [col.season]: { cellWidth: 18 },
-          [col.stock]: { cellWidth: 8 },
-          [col.price]: { cellWidth: 16 },
+          [col.stock]: { cellWidth: 7 },
+          [col.price]: { cellWidth: 15 },
         }
       : {
           [col.category]: { cellWidth: 15 },
           [col.brand]: { cellWidth: 22 },
-          [col.size]: { cellWidth: 23 },
+          [col.size]: { cellWidth: 27 },
           [col.season]: { cellWidth: 17 },
           [col.stock]: { cellWidth: 9 },
           [col.price]: { cellWidth: 17 },
@@ -369,7 +373,8 @@ export function generateOptionsPDF({
   // NOTE: the travel surcharge is intentionally not called out as big bold
   // text after the table — it is folded into the small breakdown paragraph
   // below (and a short bullet in the notes) to stay factual and low-key.
-  if (y < 235) {
+  const pageLimit = pageHeight - 47; // keep notes above the footer
+  if (y < pageLimit) {
     doc.setTextColor(30, 41, 59);
     doc.setFontSize(8);
     doc.setFont('helvetica', 'bold');
@@ -391,7 +396,7 @@ export function generateOptionsPDF({
   }
 
   // === PRICING NOTES ===
-  if (y < 245) {
+  if (y < pageHeight - 37) {
     doc.setTextColor(30, 41, 59);
     doc.setFontSize(9);
     doc.setFont('helvetica', 'bold');
@@ -448,12 +453,17 @@ export function generateOptionsPDF({
 
     notes.push(`• Stock levels are estimates and subject to change`);
 
+    // Each note renders on ONE line: anything too long is truncated with an
+    // ellipsis instead of wrapping into the next note's space.
+    const maxNoteWidth = pageWidth - margin * 2 - 4;
     notes.forEach(note => {
-      const lines = doc.splitTextToSize(note, pageWidth - margin * 2);
-      lines.forEach(line => {
-        doc.text(line, margin, y);
-        y += 4;
-      });
+      let text = note;
+      if (doc.getTextWidth(text) > maxNoteWidth) {
+        while (text.length > 4 && doc.getTextWidth(text + '…') > maxNoteWidth) text = text.slice(0, -1);
+        text = text.trimEnd() + '…';
+      }
+      doc.text(text, margin, y);
+      y += 4;
     });
 
     y += 3;
@@ -464,7 +474,7 @@ export function generateOptionsPDF({
   // Only rendered when showTotals is set — many quotes are option sheets where
   // a single combined number across options would be misleading.
   if (showTotals) {
-    if (y > 235) { doc.addPage(); y = 20; }
+    if (y > pageHeight - 40) { doc.addPage(); y = 20; }
     doc.setDrawColor(226, 232, 240);
     doc.setLineWidth(0.5);
     doc.line(margin, y, pageWidth - margin, y);
@@ -502,8 +512,9 @@ export function generateOptionsPDF({
   // === FOOTER ===
   doc.setTextColor(148, 163, 184);
   doc.setFontSize(8);
-  doc.text(`Generated ${new Date().toLocaleString()}`, margin, 280);
-  doc.text('QuickRev Inc. | quickrev.ca', pageWidth - margin, 280, { align: 'right' });
+  const footerY = pageHeight - 12;
+  doc.text(`Generated ${new Date().toLocaleString()}`, margin, footerY);
+  doc.text('QuickRev Inc. | quickrev.ca', pageWidth - margin, footerY, { align: 'right' });
 
   // Save
   const sizeLabel = (tireSize || 'quote').replace(/[^0-9a-zA-Z-]/g, '-');
