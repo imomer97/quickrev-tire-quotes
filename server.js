@@ -332,37 +332,50 @@ app.post('/api/send-quote-email', requireSyncKey, async (req, res) => {
   }
 
   // Titan SMTP (also works for any standard SMTP provider by overriding the
-  // EMAIL_HOST/EMAIL_PORT env vars).
+  // EMAIL_HOST/EMAIL_PORT env vars). Some hosts block outbound 465 — if the
+  // connection times out, automatically retry on 587 (STARTTLS).
   const host = process.env.EMAIL_HOST || 'smtp.titan.email';
-  const port = Number(process.env.EMAIL_PORT || 465);
-  try {
-    const transporter = nodemailer.createTransport({
-      host,
-      port,
-      secure: port === 465,
-      auth: { user: emailUser, pass: emailPass },
-      connectionTimeoutMillis: 15000,
-      greetingTimeout: 15000,
-      socketTimeout: 25000,
-    });
-    const info = await transporter.sendMail({
-      from: `"${fromName}" <${fromAddr}>`,
-      to,
-      subject: subject || 'Your QuickRev Quote',
-      text: text || (html || '').replace(/<br\s*\/?>/gi, '\n').replace(/<[^>]+>/g, ''),
-      html: html || '<p>Please find your quote attached.</p>',
-      attachments: [{
-        filename: filename || 'QuickRev-Quote.pdf',
-        content: Buffer.from(pdfBase64, 'base64'),
-        contentType: 'application/pdf',
-      }],
-    });
-    console.log(`Quote email sent via ${host} to ${to} (${info.messageId})`);
-    res.json({ success: true, id: info.messageId, provider: host });
-  } catch (err) {
-    console.error('SMTP send failed:', err.message);
-    res.status(502).json({ success: false, error: `Mail server rejected the send: ${err.message}` });
+  const ports = process.env.EMAIL_PORT
+    ? [Number(process.env.EMAIL_PORT)]
+    : [465, 587];
+  let lastErr = null;
+  for (const port of ports) {
+    try {
+      const transporter = nodemailer.createTransport({
+        host,
+        port,
+        secure: port === 465,
+        auth: { user: emailUser, pass: emailPass },
+        connectionTimeoutMillis: 15000,
+        greetingTimeout: 15000,
+        socketTimeout: 25000,
+      });
+      const info = await transporter.sendMail({
+        from: `"${fromName}" <${fromAddr}>`,
+        to,
+        subject: subject || 'Your QuickRev Quote',
+        text: text || (html || '').replace(/<br\s*\/?>/gi, '\n').replace(/<[^>]+>/g, ''),
+        html: html || '<p>Please find your quote attached.</p>',
+        attachments: [{
+          filename: filename || 'QuickRev-Quote.pdf',
+          content: Buffer.from(pdfBase64, 'base64'),
+          contentType: 'application/pdf',
+        }],
+      });
+      console.log(`Quote email sent via ${host}:${port} to ${to} (${info.messageId})`);
+      return res.json({ success: true, id: info.messageId, provider: `${host}:${port}` });
+    } catch (err) {
+      console.error(`SMTP send failed via ${host}:${port}:`, err.message);
+      lastErr = err;
+    }
   }
+  const blocked = /timeout|ETIMEDOUT|ECONNREFUSED|EHOSTUNREACH/i.test(lastErr && lastErr.message || '');
+  res.status(blocked ? 504 : 502).json({
+    success: false,
+    error: blocked
+      ? `Could not reach ${host} from the server (both ports 465 and 587 timed out). Titan is likely blocking or deprioritizing connections from Render's datacenter IPs. Options: (1) use a relay such as SendGrid/Resend/SMTP2GO which publish SMTP ports approved for cloud hosts, or (2) set EMAIL_HOST/EMAIL_PORT on Render to a relay host.`
+      : `Mail server rejected the send: ${lastErr && lastErr.message}`,
+  });
 });
 
 // Pull the shared data (the app calls this on load).
