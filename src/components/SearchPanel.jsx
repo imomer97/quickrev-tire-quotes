@@ -95,6 +95,8 @@ export default function SearchPanel({ tires, updateTire, deleteTire, addTire, bu
   const [vehicleType, setVehicleType] = useState('');
   const [buyFromQuickRev, setBuyFromQuickRev] = useState(true);
   const [customerName, setCustomerName] = useState('');
+  // Opt-in totals block on the PDF: subtotal / HST / grand total after the notes.
+  const [showPdfTotals, setShowPdfTotals] = useState(false);
   // PDF-only field: the size shown on the generated quote (independent of the search box)
   const [pdfTireSize, setPdfTireSize] = useState('');
   // Number of the purchased tires that will actually be installed (e.g. buy 4, install 2)
@@ -822,6 +824,8 @@ export default function SearchPanel({ tires, updateTire, deleteTire, addTire, bu
       travelSurcharge: showInstall ? postalInfo.surcharge : 0,
       // Manual drag order overrides the automatic price sort in the PDF.
       preserveOrder: manualQuoteOrder,
+      // Opt-in totals block (subtotal / HST / grand total) at the end.
+      showTotals: showPdfTotals,
     });
   };
 
@@ -1243,6 +1247,14 @@ ${stockText}
                 <option value="stock-desc">Stock (Most)</option>
               </select>
             </div>
+            <label className="flex items-center gap-2 cursor-pointer" title="Add a subtotal, HST, and grand-total block at the end of the PDF">
+              <input
+                type="checkbox"
+                checked={showPdfTotals}
+                onChange={(e) => setShowPdfTotals(e.target.checked)}
+              />
+              <span className="text-sm font-medium">Show totals on PDF</span>
+            </label>
             <input
               type="text"
               className="input flex-1 min-w-48"

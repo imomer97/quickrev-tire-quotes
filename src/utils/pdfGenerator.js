@@ -50,6 +50,9 @@ export function generateOptionsPDF({
   // When true, rows keep the order passed in (a manual drag arrangement) instead
   // of being re-sorted by price. Free items are still grouped at the bottom.
   preserveOrder = false,
+  // When true, append a totals block after the pricing notes: pre-tax subtotal,
+  // HST, travel surcharge (if any), and the quote grand total.
+  showTotals = false,
 }) {
   const doc = new jsPDF({ unit: 'mm', format: 'letter' });
   const pageWidth = doc.internal.pageSize.getWidth();
@@ -246,7 +249,7 @@ export function generateOptionsPDF({
     if (showPeriod) row.push(salePeriod);               // e.g. "Aug 1 – 15" or "until Aug 15"
     if (showInstallCol) row.push(installPerTire > 0 ? formatCurrency(installPerTire) : '—');  // Installation / programming (per item)
     row.push(formatCurrency(totalHST), formatCurrency(grandTotal));
-    return { cells: row, price: tirePrice, isFree: !!tire.isFree };
+    return { cells: row, price: tirePrice, isFree: !!tire.isFree, preTax: tirePrice * itemQty + (installEligible ? installPerTire * installQty : 0), totalHST };
   });
 
   // Default order for customers: by effective price per tire, lowest first,
@@ -428,6 +431,46 @@ export function generateOptionsPDF({
     });
 
     y += 3;
+  }
+
+  // === TOTALS BLOCK (opt-in) ===
+  // Sum of every row: pre-tax subtotal, HST, travel surcharge, grand total.
+  // Only rendered when showTotals is set — many quotes are option sheets where
+  // a single combined number across options would be misleading.
+  if (showTotals) {
+    if (y > 235) { doc.addPage(); y = 20; }
+    doc.setDrawColor(226, 232, 240);
+    doc.setLineWidth(0.5);
+    doc.line(margin, y, pageWidth - margin, y);
+    y += 6;
+
+    let subtotalPreTax = 0;
+    let subtotalHST = 0;
+    rowMeta.forEach(r => {
+      // Recompute from stored row math: grand = preTax + hst
+      // preTax and hst were folded into grandTotal; recover via cells is
+      // fragile, so rowMeta carries the computed parts below.
+      subtotalPreTax += r.preTax || 0;
+      subtotalHST += r.totalHST || 0;
+    });
+    const grand = subtotalPreTax + subtotalHST + travelSurcharge;
+
+    const line = (label, value, bold = false) => {
+      doc.setFont('helvetica', bold ? 'bold' : 'normal');
+      doc.setFontSize(bold ? 11 : 9);
+      doc.setTextColor(30, 41, 59);
+      doc.text(label, margin, y);
+      doc.text(value, pageWidth - margin, y, { align: 'right' });
+      y += bold ? 7 : 5;
+    };
+
+    line('Subtotal (pre-tax)', formatCurrency(subtotalPreTax));
+    line('HST (14%)', formatCurrency(subtotalHST));
+    if (travelSurcharge > 0) line('Travel surcharge (per job)', formatCurrency(travelSurcharge));
+    doc.setDrawColor(148, 163, 184);
+    doc.line(margin, y - 2, pageWidth - margin, y - 2);
+    y += 2;
+    line('Grand Total', formatCurrency(grand), true);
   }
 
   // === FOOTER ===
