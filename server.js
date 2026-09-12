@@ -342,6 +342,8 @@ app.post('/api/send-quote-email', requireSyncKey, async (req, res) => {
       secure: port === 465,
       auth: { user: emailUser, pass: emailPass },
       connectionTimeoutMillis: 15000,
+      greetingTimeout: 15000,
+      socketTimeout: 25000,
     });
     const info = await transporter.sendMail({
       from: `"${fromName}" <${fromAddr}>`,
