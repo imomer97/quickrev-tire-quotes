@@ -3,7 +3,7 @@ import { resizeImageFile } from '../utils/imageResize';
 import {
   Search, Download, Check, X, Pencil, Trash2, ChevronDown,
   FileText, CheckSquare, Square, Filter, ArrowUpDown,
-  Car, Wrench, Info, Plus, GripVertical, ListOrdered, Eye, Mail
+  Car, Wrench, Info, Plus, GripVertical, ListOrdered, Eye, Mail, History
 } from 'lucide-react';
 import {
   DISTRIBUTORS,
@@ -33,6 +33,7 @@ import {
   getInstallFeeForItem,
 } from '../data/distributors.js';
 import { generateOptionsPDF } from '../utils/pdfGenerator.js';
+import { useQuoteHistory, loadEmailTemplate, saveEmailTemplate, renderEmailTemplate, DEFAULT_EMAIL_TEMPLATE } from '../hooks/useQuoteHistory.js';
 
 export default function SearchPanel({ tires, updateTire, deleteTire, addTire, bulkUpdateTires, warehouseLocations, distributors, onAddDistributor }) {
   // === SEARCH & FILTERS ===
@@ -102,6 +103,16 @@ export default function SearchPanel({ tires, updateTire, deleteTire, addTire, bu
   const [pdfPreviewUrl, setPdfPreviewUrl] = useState(null);
   // True while jsPDF renders — it blocks the main thread, so the UI shows a spinner.
   const [pdfGenerating, setPdfGenerating] = useState(false);
+  // === QUOTE HISTORY ===
+  const { quotes: quoteHistory, saveQuote: saveQuoteToHistory, deleteQuote: deleteQuoteFromHistory, refresh: refreshQuoteHistory } = useQuoteHistory();
+  const [showHistory, setShowHistory] = useState(false);
+  // === EMAIL QUOTE MODAL ===
+  const [showEmailModal, setShowEmailModal] = useState(false);
+  const [emailDraft, setEmailDraft] = useState(null); // { to, subject, body, pdfBase64, filename }
+  const [emailTemplate, setEmailTemplate] = useState(loadEmailTemplate);
+  const [showTemplateEdit, setShowTemplateEdit] = useState(false);
+  const [emailSending, setEmailSending] = useState(false);
+  const [emailResult, setEmailResult] = useState(null); // { ok, message }
   // PDF-only field: the size shown on the generated quote (independent of the search box)
   const [pdfTireSize, setPdfTireSize] = useState('');
   // Number of the purchased tires that will actually be installed (e.g. buy 4, install 2)
@@ -840,6 +851,42 @@ export default function SearchPanel({ tires, updateTire, deleteTire, addTire, bu
     return true;
   };
 
+  // Snapshot the current quote for history (saved on every PDF generate).
+  const buildQuoteSnapshot = () => {
+    const opts = buildPdfOptions();
+    let total = 0;
+    try {
+      total = quoteItems.reduce((sum, item) => {
+        const q = (typeof item.quoteQty === 'number' && item.quoteQty > 0) ? item.quoteQty : quantity;
+        return sum + (getEffectiveRetail(item) || 0) * q * (1 + HST_RATE);
+      }, 0);
+    } catch { total = 0; }
+    return {
+      id: `q_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+      createdAt: new Date().toISOString(),
+      customerName,
+      items: quoteItems.map(i => ({
+        brand: i.brand, model: i.model, size: i.size, season: i.season,
+        category: i.category || 'tire', price: getEffectiveRetail(i) || 0,
+        qty: (typeof i.quoteQty === 'number' && i.quoteQty > 0) ? i.quoteQty : quantity,
+        distributorId: i.distributorId || '',
+      })),
+      options: {
+        quantity, vehicleType, includeInstallation: showInstall,
+        tireSize: pdfTireSize, installQty, postalCode,
+        travelSurcharge: showInstall ? postalInfo.surcharge : 0,
+        showTotals: showPdfTotals, orientation: pdfLandscape ? 'landscape' : 'portrait',
+        theme: pdfBw ? 'bw' : 'color', preserveOrder: manualQuoteOrder,
+      },
+      itemCount: quoteItems.length,
+      total: Math.round(total * 100) / 100,
+      // The full items list is also stored as `tires` (the PDF generator's
+      // expected shape) so a history quote can regenerate its PDF verbatim.
+      tires: quoteItems,
+      quoteQtyByIndex: quoteItems.map(i => (typeof i.quoteQty === 'number' && i.quoteQty > 0) ? i.quoteQty : quantity),
+    };
+  };
+
   const handleGeneratePDF = () => {
     if (!checkPdfReady()) return;
     setPdfGenerating(true);
@@ -847,40 +894,152 @@ export default function SearchPanel({ tires, updateTire, deleteTire, addTire, bu
     setTimeout(() => {
       try {
         generateOptionsPDF(buildPdfOptions());
+        saveQuoteToHistory(buildQuoteSnapshot());
       } finally {
         setPdfGenerating(false);
       }
     }, 50);
   };
 
-  // Email the quote: generate the PDF and open a mail draft with it attached
-  // (via a local file download the user drags in when their mail client can't
-  // auto-attach; the mailto link carries subject + a plain-text summary).
+  // Email the quote: generate the PDF server-side-ready (base64) and open the
+  // email modal. The user enters the customer's address, tweaks the
+  // placeholder-rendered message, and the server sends the PDF as a real
+  // attachment (Resend). Falls back to a mailto draft if the server isn't
+  // configured for direct sending.
   const handleEmailQuote = () => {
     if (!checkPdfReady()) return;
     setPdfGenerating(true);
     setTimeout(() => {
       try {
-        const opts = buildPdfOptions();
-        const doc = generateOptionsPDF({ ...opts, previewOnly: true });
-        const blob = doc.output('blob');
+        const doc = generateOptionsPDF({ ...buildPdfOptions(), previewOnly: true });
+        const base64 = doc.output('datauristring').split(',')[1] || '';
         const filename = `QuickRev-Quote-${(customerName || 'customer').replace(/[^a-z0-9]+/gi, '-')}.pdf`;
-        // Download the PDF so the user can attach it (browsers cannot attach files to mailto drafts).
-        const a = document.createElement('a');
-        a.href = URL.createObjectURL(blob);
-        a.download = filename;
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-        setTimeout(() => URL.revokeObjectURL(a.href), 10000);
-        // Open the mail draft with subject and body pre-filled.
-        const subject = `Your QuickRev Quote${customerName ? ` for ${customerName}` : ''}`;
-        const body = `Hello${customerName ? ` ${customerName}` : ''},\n\nPlease find attached your quote (${filename}).\n\nAny questions, just reply to this email.\n\n— QuickRev\nquickrev.ca`;
-        window.location.href = `mailto:?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+        const snapshot = buildQuoteSnapshot();
+        saveQuoteToHistory(snapshot);
+        const body = renderEmailTemplate(emailTemplate, {
+          customer: customerName,
+          items: snapshot.itemCount,
+          total: snapshot.total ? formatCurrency(snapshot.total) : '',
+          filename,
+          postal: postalCode,
+          vehicle: vehicleType,
+        });
+        setEmailResult(null);
+        setEmailDraft({ to: '', subject: `Your QuickRev Quote${customerName ? ` for ${customerName}` : ''}`, body, pdfBase64: base64, filename });
+        setShowEmailModal(true);
       } finally {
         setPdfGenerating(false);
       }
     }, 50);
+  };
+
+  // Send the drafted email through the server (Resend attaches the PDF).
+  const sendQuoteEmail = async () => {
+    if (!emailDraft) return;
+    if (!emailDraft.to.trim()) {
+      setEmailResult({ ok: false, message: 'Enter the customer\u2019s email address.' });
+      return;
+    }
+    setEmailSending(true);
+    setEmailResult(null);
+    try {
+      const r = await fetch('/api/send-quote-email', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-sync-key': (import.meta.env.VITE_SYNC_KEY || 'quickrev-app') },
+        body: JSON.stringify({
+          to: emailDraft.to.trim(),
+          subject: emailDraft.subject,
+          html: emailDraft.body.replace(/\n/g, '<br>'),
+          pdfBase64: emailDraft.pdfBase64,
+          filename: emailDraft.filename,
+        }),
+      });
+      const d = await r.json();
+      if (d.success) {
+        setEmailResult({ ok: true, message: `Quote emailed to ${emailDraft.to.trim()} — the PDF is attached.` });
+      } else {
+        // Server not configured (501) or refused: fall back to a mailto draft
+        // so the user still gets a usable draft with the message pre-filled.
+        window.location.href = `mailto:${encodeURIComponent(emailDraft.to.trim())}?subject=${encodeURIComponent(emailDraft.subject)}&body=${encodeURIComponent(emailDraft.body)}`;
+        setEmailResult({ ok: false, message: `Direct send unavailable: ${d.error || 'unknown error'} — opened a mail draft instead. Attach ${emailDraft.filename} from your Downloads.` });
+      }
+    } catch (err) {
+      setEmailResult({ ok: false, message: `Could not reach the server: ${err.message}` });
+    } finally {
+      setEmailSending(false);
+    }
+  };
+
+  // === QUOTE HISTORY ACTIONS ===
+  // Reopen: load the saved items back into the working quote.
+  const reopenHistoryQuote = (q) => {
+    if (!q || !Array.isArray(q.tires)) return;
+    setQuoteItems(q.tires.map((t, i) => ({
+      ...t,
+      id: t.id || `hist_${q.id}_${i}`,
+      quoteQty: (q.quoteQtyByIndex && typeof q.quoteQtyByIndex[i] === 'number') ? q.quoteQtyByIndex[i] : (t.quoteQty || quantity),
+    })));
+    if (q.customerName) setCustomerName(q.customerName);
+    const o = q.options || {};
+    if (o.vehicleType) setVehicleType(o.vehicleType);
+    if (typeof o.includeInstallation === 'boolean') setShowInstall(o.includeInstallation);
+    if (typeof o.tireSize === 'string') setPdfTireSize(o.tireSize);
+    if (typeof o.installQty === 'number') setInstallQty(o.installQty);
+    if (typeof o.postalCode === 'string') setPostalCode(o.postalCode);
+    if (typeof o.showTotals === 'boolean') setShowPdfTotals(o.showTotals);
+    if (o.orientation) setPdfLandscape(o.orientation === 'landscape');
+    if (o.theme) setPdfBw(o.theme === 'bw');
+    setShowHistory(false);
+  };
+
+  // Duplicate: copy a history quote as the current working quote (does not
+  // touch the original history entry).
+  const duplicateHistoryQuote = (q) => {
+    if (!q || !Array.isArray(q.tires)) return;
+    setQuoteItems(q.tires.map((t, i) => ({
+      ...t,
+      id: `dup_${Date.now()}_${i}`,
+      quoteQty: (q.quoteQtyByIndex && typeof q.quoteQtyByIndex[i] === 'number') ? q.quoteQtyByIndex[i] : (t.quoteQty || quantity),
+    })));
+    if (q.customerName) setCustomerName(q.customerName);
+    setShowHistory(false);
+  };
+
+  // Re-email: generate the stored quote's PDF and open the email modal for it.
+  const reemailHistoryQuote = (q) => {
+    if (!q || !Array.isArray(q.tires)) return;
+    const o = q.options || {};
+    const doc = generateOptionsPDF({
+      tires: q.tires,
+      quantity: o.quantity || 4,
+      quantityFor: (item) => (item && typeof item.quoteQty === 'number' && item.quoteQty > 0) ? item.quoteQty : (o.quantity || 4),
+      vehicleType: o.vehicleType || 'sedan',
+      includeInstallation: o.includeInstallation !== false,
+      customerName: q.customerName || '',
+      tireSize: o.tireSize || '',
+      installQty: o.installQty || o.quantity || 4,
+      postalCode: o.postalCode || '',
+      travelSurcharge: o.travelSurcharge || 0,
+      preserveOrder: !!o.preserveOrder,
+      showTotals: !!o.showTotals,
+      orientation: o.orientation || 'portrait',
+      theme: o.theme || 'color',
+      previewOnly: true,
+    });
+    const base64 = doc.output('datauristring').split(',')[1] || '';
+    const filename = `QuickRev-Quote-${(q.customerName || 'customer').replace(/[^a-z0-9]+/gi, '-')}.pdf`;
+    const body = renderEmailTemplate(emailTemplate, {
+      customer: q.customerName,
+      items: q.itemCount ?? (q.tires ? q.tires.length : 0),
+      total: q.total ? formatCurrency(q.total) : '',
+      filename,
+      postal: o.postalCode,
+      vehicle: o.vehicleType,
+    });
+    setEmailResult(null);
+    setEmailDraft({ to: '', subject: `Your QuickRev Quote${q.customerName ? ` for ${q.customerName}` : ''}`, body, pdfBase64: base64, filename });
+    setShowEmailModal(true);
+    setShowHistory(false);
   };
 
   // Live preview: render the exact PDF into an in-app iframe via a blob URL.
@@ -1348,9 +1507,13 @@ ${stockText}
               <Eye className="w-4 h-4" />
               Preview
             </button>
-            <button className="btn btn-ghost" onClick={handleEmailQuote} disabled={quoteItems.length === 0} title="Download the PDF and open an email draft for the customer — attach the downloaded file">
+            <button className="btn btn-ghost" onClick={handleEmailQuote} disabled={quoteItems.length === 0} title="Send the quote to the customer by email with the PDF attached">
               <Mail className="w-4 h-4" />
               Email
+            </button>
+            <button className="btn btn-ghost" onClick={() => { setShowHistory(s => !s); refreshQuoteHistory(); }} title="Past quotes — reopen, duplicate, or re-email any saved quote">
+              <History className="w-4 h-4" />
+              History{quoteHistory.length > 0 ? ` (${quoteHistory.length})` : ''}
             </button>
             <button className="btn btn-primary" onClick={handleGeneratePDF} disabled={quoteItems.length === 0}>
               <Download className="w-4 h-4" />
@@ -1359,6 +1522,116 @@ ${stockText}
           </div>
         </div>
       </div>
+
+      {/* === EMAIL QUOTE MODAL === */}
+      {showEmailModal && emailDraft && (
+        <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4" onClick={() => { setShowEmailModal(false); setShowTemplateEdit(false); }}>
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-xl max-h-[90vh] flex flex-col overflow-hidden" style={{ maxHeight: '90vh' }} onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-4 py-2 border-b border-slate-200">
+              <h3 className="font-semibold text-sm">Email Quote — PDF attached automatically</h3>
+              <button className="btn btn-sm btn-ghost" onClick={() => { setShowEmailModal(false); setShowTemplateEdit(false); }}><X className="w-4 h-4" /></button>
+            </div>
+            <div className="p-4 space-y-3 overflow-y-auto">
+              <div>
+                <label className="text-xs font-semibold text-muted uppercase block mb-1">To (customer email)</label>
+                <input
+                  type="email"
+                  className="input w-full"
+                  placeholder="customer@example.com"
+                  value={emailDraft.to}
+                  onChange={(e) => setEmailDraft(d => ({ ...d, to: e.target.value }))}
+                />
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-muted uppercase block mb-1">Subject</label>
+                <input
+                  type="text"
+                  className="input w-full"
+                  value={emailDraft.subject}
+                  onChange={(e) => setEmailDraft(d => ({ ...d, subject: e.target.value }))}
+                />
+              </div>
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-xs font-semibold text-muted uppercase">Message</label>
+                  <button className="text-xs text-accent underline" onClick={() => setShowTemplateEdit(s => !s)}>
+                    {showTemplateEdit ? 'Done editing template' : 'Edit template'}
+                  </button>
+                </div>
+                {showTemplateEdit ? (
+                  <div>
+                    <textarea
+                      className="input w-full font-mono text-xs"
+                      rows={10}
+                      value={emailTemplate}
+                      onChange={(e) => { setEmailTemplate(e.target.value); saveEmailTemplate(e.target.value); }}
+                    />
+                    <p className="text-xs text-muted mt-1">
+                      Placeholders: <code>{'{{customer}}'}</code> <code>{'{{items}}'}</code> <code>{'{{total}}'}</code> <code>{'{{filename}}'}</code> <code>{'{{date}}'}</code> <code>{'{{postal}}'}</code> <code>{'{{vehicle}}'}</code>
+                      {' · '}<button className="underline" onClick={() => { setEmailTemplate(DEFAULT_EMAIL_TEMPLATE); saveEmailTemplate(DEFAULT_EMAIL_TEMPLATE); }}>reset to default</button>
+                    </p>
+                  </div>
+                ) : (
+                  <textarea
+                    className="input w-full text-sm"
+                    rows={9}
+                    value={emailDraft.body}
+                    onChange={(e) => setEmailDraft(d => ({ ...d, body: e.target.value }))}
+                  />
+                )}
+              </div>
+              <p className="text-xs text-muted">📎 {emailDraft.filename} is generated and attached when you send.</p>
+              {emailResult && (
+                <p className={`text-sm font-medium ${emailResult.ok ? 'text-success' : 'text-warning'}`}>{emailResult.ok ? '✓ ' : '⚠ '}{emailResult.message}</p>
+              )}
+            </div>
+            <div className="flex items-center justify-end gap-2 px-4 py-3 border-t border-slate-200">
+              <button className="btn btn-ghost" onClick={() => { setShowEmailModal(false); setShowTemplateEdit(false); }}>Cancel</button>
+              <button className="btn btn-primary" onClick={sendQuoteEmail} disabled={emailSending}>
+                {emailSending ? 'Sending…' : 'Send Email'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* === QUOTE HISTORY PANEL === */}
+      {showHistory && (
+        <div className="card p-4 mb-4">
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="font-semibold flex items-center gap-2">
+              <History className="w-4 h-4 text-accent" />
+              Quote History {quoteHistory.length > 0 && <span className="badge badge-blue">{quoteHistory.length}</span>}
+            </h2>
+            <button className="btn btn-sm btn-ghost" onClick={() => setShowHistory(false)}><X className="w-4 h-4" /></button>
+          </div>
+          {quoteHistory.length === 0 ? (
+            <p className="text-sm text-muted">No saved quotes yet — every PDF you generate is saved here automatically (last 200, shared across devices).</p>
+          ) : (
+            <ul className="flex flex-col gap-2 max-h-96 overflow-y-auto">
+              {quoteHistory.map((q) => (
+                <li key={q.id} className="flex items-center gap-3 border border-slate-200 rounded-lg px-3 py-2">
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium truncate">
+                      {q.customerName || 'Unnamed customer'}
+                      <span className="text-muted font-normal"> · {q.itemCount ?? (q.tires ? q.tires.length : 0)} item(s)</span>
+                      {q.total ? <span className="text-muted font-normal"> · {formatCurrency(q.total)}</span> : null}
+                    </p>
+                    <p className="text-xs text-muted">
+                      {q.createdAt ? new Date(q.createdAt).toLocaleString() : ''}
+                      {q.options && q.options.postalCode ? ` · ${q.options.postalCode}` : ''}
+                    </p>
+                  </div>
+                  <button className="btn btn-sm btn-ghost" onClick={() => reopenHistoryQuote(q)} title="Load this quote back into the quote panel">Reopen</button>
+                  <button className="btn btn-sm btn-ghost" onClick={() => duplicateHistoryQuote(q)} title="Copy this quote as the current quote">Duplicate</button>
+                  <button className="btn btn-sm btn-primary" onClick={() => reemailHistoryQuote(q)} title="Email this saved quote to the customer again"><Mail className="w-4 h-4" /></button>
+                  <button className="btn btn-sm btn-ghost text-danger" onClick={() => deleteQuoteFromHistory(q.id)} title="Delete from history"><Trash2 className="w-4 h-4" /></button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
 
       {/* === PDF GENERATING SPINNER === */}
       {pdfGenerating && (

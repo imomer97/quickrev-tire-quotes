@@ -13,7 +13,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const app = express();
 app.use(cors());
-app.use(express.json({ limit: '2mb' }));
+app.use(express.json({ limit: '25mb' })); // 25mb: quote emails carry the full PDF as base64 (~1.37x binary size)
 
 // Prefer the platform-standard PORT (Render/Railway/Fly inject this);
 // PROXY_PORT remains for local setups that used it.
@@ -118,7 +118,91 @@ function requireSyncKey(req, res, next) {
   next();
 }
 
-const EMPTY_SYNC = { manualTires: [], overrides: {}, deletedKeys: [], warehouseLocations: [], customDistributors: [], installServiceRates: {} };
+const EMPTY_SYNC = { manualTires: [], overrides: {}, deletedKeys: [], warehouseLocations: [], customDistributors: [], installServiceRates: {}, quoteHistory: [] };
+
+// === QUOTE HISTORY ===
+// Every generated quote is saved (items, totals, options, customer) so past
+// quotes can be reopened, duplicated, and re-emailed from any device. Stored
+// in the same Postgres/JSON store as the rest of the shared data.
+app.get('/api/quote-history', requireSyncKey, async (req, res) => {
+  try {
+    const data = await store.read();
+    res.json({ success: true, quotes: (data && Array.isArray(data.quoteHistory)) ? data.quoteHistory : [] });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post('/api/quote-history', requireSyncKey, async (req, res) => {
+  try {
+    const quote = req.body || {};
+    if (!quote.id) return res.status(400).json({ success: false, error: 'Missing quote id.' });
+    const data = (await store.read()) || { ...EMPTY_SYNC };
+    const history = Array.isArray(data.quoteHistory) ? data.quoteHistory : [];
+    const idx = history.findIndex(q => q.id === quote.id);
+    if (idx >= 0) history[idx] = quote; else history.unshift(quote);
+    // Keep the most recent 200 quotes so the store never grows unbounded.
+    data.quoteHistory = history.slice(0, 200);
+    await store.write(data);
+    res.json({ success: true, quotes: data.quoteHistory });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.delete('/api/quote-history/:id', requireSyncKey, async (req, res) => {
+  try {
+    const data = (await store.read()) || { ...EMPTY_SYNC };
+    data.quoteHistory = (Array.isArray(data.quoteHistory) ? data.quoteHistory : []).filter(q => q.id !== req.params.id);
+    await store.write(data);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// === SEND QUOTE EMAIL (server-side, PDF attached) ===
+// Uses Resend when RESEND_API_KEY is set. The PDF arrives as a real
+// attachment — no manual download/drag-and-drop needed.
+app.post('/api/send-quote-email', requireSyncKey, async (req, res) => {
+  const { to, subject, html, pdfBase64, filename } = req.body || {};
+  if (!to || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(to)) {
+    return res.status(400).json({ success: false, error: 'A valid customer email address is required.' });
+  }
+  if (!pdfBase64) return res.status(400).json({ success: false, error: 'Missing PDF attachment.' });
+
+  const apiKey = process.env.RESEND_API_KEY;
+  const from = process.env.QUOTE_EMAIL_FROM || 'QuickRev Quotes <quotes@quickrev.ca>';
+  if (!apiKey) {
+    return res.status(501).json({
+      success: false,
+      error: 'Email sending is not configured on the server. Add RESEND_API_KEY (and optionally QUOTE_EMAIL_FROM) in the Render environment settings, then redeploy.',
+    });
+  }
+
+  try {
+    const response = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        from,
+        to: [to],
+        subject: subject || 'Your QuickRev Quote',
+        html: html || '<p>Please find your quote attached.</p>',
+        attachments: [{ filename: filename || 'QuickRev-Quote.pdf', content: pdfBase64 }],
+      }),
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      console.error('Resend send failed:', response.status, result);
+      return res.status(response.status).json({ success: false, error: result.message || `Resend error (HTTP ${response.status})` });
+    }
+    res.json({ success: true, id: result.id });
+  } catch (err) {
+    console.error('send-quote-email failed:', err.message);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
 
 // Pull the shared data (the app calls this on load).
 app.get('/api/sync-data', requireSyncKey, async (req, res) => {
