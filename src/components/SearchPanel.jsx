@@ -1,5 +1,95 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { resizeImageFile } from '../utils/imageResize';
+
+/**
+ * Searchable input with past-customer suggestions drawn from quote history.
+ * field='name' suggests customer names (quote's customer-name field);
+ * field='email' suggests the email addresses recorded on history rows (the
+ * email modal's To field) and pre-fills the matching customer's name too.
+ */
+function CustomerAutocomplete({ value, onChange, history, field = 'name', className = 'input', placeholder = '', type = 'text' }) {
+  const [open, setOpen] = useState(false);
+  const [highlight, setHighlight] = useState(-1);
+  const wrapRef = useRef(null);
+  const blurTimer = useRef(null);
+
+  // Unique suggestion list (most recent first), filtered by what's typed.
+  const suggestions = useMemo(() => {
+    const seen = new Set();
+    const out = [];
+    for (const q of (history || [])) {
+      const names = [];
+      if (field === 'email') {
+        if (q.emailStatus && q.emailStatus.to) names.push({ email: q.emailStatus.to, name: q.customerName || '' });
+      } else if (q.customerName && q.customerName.trim()) {
+        names.push({ email: q.emailStatus && q.emailStatus.to ? q.emailStatus.to : '', name: q.customerName.trim() });
+      }
+      for (const n of names) {
+        const key = (field === 'email' ? n.email : n.name).toLowerCase();
+        if (!key || seen.has(key)) continue;
+        seen.add(key);
+        out.push(n);
+      }
+      if (out.length >= 50) break;
+    }
+    const q = value.trim().toLowerCase();
+    if (!q) return out.slice(0, 8);
+    return out.filter(n => (field === 'email' ? n.email : n.name).toLowerCase().includes(q)).slice(0, 8);
+  }, [history, value, field]);
+
+  // Close the dropdown when clicking anywhere outside.
+  useEffect(() => {
+    const onDoc = (e) => {
+      if (wrapRef.current && !wrapRef.current.contains(e.target)) setOpen(false);
+    };
+    document.addEventListener('mousedown', onDoc);
+    return () => document.removeEventListener('mousedown', onDoc);
+  }, []);
+
+  const pick = (s) => {
+    onChange(field === 'email' ? s.email : s.name);
+    setOpen(false);
+    setHighlight(-1);
+  };
+
+  return (
+    <div ref={wrapRef} className="relative flex-1 min-w-0">
+      <input
+        type={type}
+        className={className}
+        placeholder={placeholder}
+        value={value}
+        autoComplete="off"
+        onChange={(e) => { onChange(e.target.value); setOpen(true); setHighlight(-1); }}
+        onFocus={() => setOpen(true)}
+        onBlur={() => { blurTimer.current = setTimeout(() => setOpen(false), 150); }}
+        onKeyDown={(e) => {
+          if (!open || suggestions.length === 0) return;
+          if (e.key === 'ArrowDown') { e.preventDefault(); setHighlight(h => Math.min(h + 1, suggestions.length - 1)); }
+          else if (e.key === 'ArrowUp') { e.preventDefault(); setHighlight(h => Math.max(h - 1, 0)); }
+          else if (e.key === 'Enter' && highlight >= 0) { e.preventDefault(); pick(suggestions[highlight]); }
+          else if (e.key === 'Escape') setOpen(false);
+        }}
+      />
+      {open && suggestions.length > 0 && (
+        <ul className="absolute left-0 right-0 top-full z-40 mt-1 bg-white border border-slate-200 rounded-lg shadow-lg max-h-56 overflow-y-auto">
+          {suggestions.map((s, i) => (
+            <li
+              key={(field === 'email' ? s.email : s.name) + i}
+              className={`px-3 py-2 text-sm cursor-pointer ${i === highlight ? 'bg-slate-100' : 'hover:bg-slate-50'}`}
+              onMouseDown={(e) => { e.preventDefault(); pick(s); }}
+              onMouseEnter={() => setHighlight(i)}
+            >
+              <span className="font-medium">{field === 'email' ? s.email : s.name}</span>
+              {field === 'email' && s.name ? <span className="text-muted"> · {s.name}</span> : null}
+              {field === 'name' && s.email ? <span className="text-muted"> · {s.email}</span> : null}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
 import {
   Search, Download, Check, X, Pencil, Trash2, ChevronDown,
   FileText, CheckSquare, Square, Filter, ArrowUpDown,
@@ -113,6 +203,9 @@ export default function SearchPanel({ tires, updateTire, deleteTire, addTire, bu
   const [showTemplateEdit, setShowTemplateEdit] = useState(false);
   const [emailSending, setEmailSending] = useState(false);
   const [emailResult, setEmailResult] = useState(null); // { ok, message }
+  // Which history quote the current email draft belongs to (so the delivery
+  // status can be written back onto that history row after send).
+  const [emailSourceId, setEmailSourceId] = useState(null);
   // PDF-only field: the size shown on the generated quote (independent of the search box)
   const [pdfTireSize, setPdfTireSize] = useState('');
   // Number of the purchased tires that will actually be installed (e.g. buy 4, install 2)
@@ -925,12 +1018,32 @@ export default function SearchPanel({ tires, updateTire, deleteTire, addTire, bu
           vehicle: vehicleType,
         });
         setEmailResult(null);
+        setEmailSourceId(snapshot.id);
         setEmailDraft({ to: '', subject: `Your QuickRev Quote${customerName ? ` for ${customerName}` : ''}`, body, pdfBase64: base64, filename });
         setShowEmailModal(true);
       } finally {
         setPdfGenerating(false);
       }
     }, 50);
+  };
+
+  // Record email delivery status onto the history row (and the current quote's
+  // row, when they differ) so past quotes show sent/failed/fallback timestamps.
+  const recordEmailStatus = async (status) => {
+    const entry = {
+      status, // 'sent' | 'failed' | 'fallback'
+      to: emailDraft.to.trim(),
+      at: new Date().toISOString(),
+    };
+    const patch = (q) => q ? { ...q, emailStatus: entry } : q;
+    if (emailSourceId) {
+      const q = quoteHistory.find(x => x.id === emailSourceId);
+      if (q) await saveQuoteToHistory(patch(q));
+    }
+    // Also stamp the row created from this email's own save (the newest row
+    // without a status matching the current customer/items).
+    const cur = quoteHistory.find(x => !x.emailStatus && x.customerName === customerName);
+    if (cur && cur.id !== emailSourceId) await saveQuoteToHistory(patch(cur));
   };
 
   // Send the drafted email through the server (Resend attaches the PDF).
@@ -957,14 +1070,17 @@ export default function SearchPanel({ tires, updateTire, deleteTire, addTire, bu
       const d = await r.json();
       if (d.success) {
         setEmailResult({ ok: true, message: `Quote emailed to ${emailDraft.to.trim()} — the PDF is attached.` });
+        await recordEmailStatus('sent');
       } else {
         // Server not configured (501) or refused: fall back to a mailto draft
         // so the user still gets a usable draft with the message pre-filled.
         window.location.href = `mailto:${encodeURIComponent(emailDraft.to.trim())}?subject=${encodeURIComponent(emailDraft.subject)}&body=${encodeURIComponent(emailDraft.body)}`;
         setEmailResult({ ok: false, message: `Direct send unavailable: ${d.error || 'unknown error'} — opened a mail draft instead. Attach ${emailDraft.filename} from your Downloads.` });
+        await recordEmailStatus('fallback');
       }
     } catch (err) {
       setEmailResult({ ok: false, message: `Could not reach the server: ${err.message}` });
+      await recordEmailStatus('failed');
     } finally {
       setEmailSending(false);
     }
@@ -1037,6 +1153,7 @@ export default function SearchPanel({ tires, updateTire, deleteTire, addTire, bu
       vehicle: o.vehicleType,
     });
     setEmailResult(null);
+    setEmailSourceId(q.id);
     setEmailDraft({ to: '', subject: `Your QuickRev Quote${q.customerName ? ` for ${q.customerName}` : ''}`, body, pdfBase64: base64, filename });
     setShowEmailModal(true);
     setShowHistory(false);
@@ -1496,12 +1613,12 @@ ${stockText}
               />
               <span className="text-sm font-medium">B&W print</span>
             </label>
-            <input
-              type="text"
+            <CustomerAutocomplete
+              value={customerName}
+              onChange={setCustomerName}
+              history={quoteHistory}
               className="input flex-1 min-w-48"
               placeholder="Customer name (optional)"
-              value={customerName}
-              onChange={(e) => setCustomerName(e.target.value)}
             />
             <button className="btn btn-ghost" onClick={handlePreviewPDF} disabled={quoteItems.length === 0} title="See the exact PDF in-app before downloading">
               <Eye className="w-4 h-4" />
@@ -1534,12 +1651,14 @@ ${stockText}
             <div className="p-4 space-y-3 overflow-y-auto">
               <div>
                 <label className="text-xs font-semibold text-muted uppercase block mb-1">To (customer email)</label>
-                <input
-                  type="email"
-                  className="input w-full"
-                  placeholder="customer@example.com"
+                <CustomerAutocomplete
                   value={emailDraft.to}
-                  onChange={(e) => setEmailDraft(d => ({ ...d, to: e.target.value }))}
+                  onChange={(v) => setEmailDraft(d => ({ ...d, to: v }))}
+                  history={quoteHistory}
+                  field="email"
+                  className="input w-full"
+                  placeholder="customer@example.com — past customers appear as you type"
+                  type="email"
                 />
               </div>
               <div>
@@ -1621,6 +1740,15 @@ ${stockText}
                       {q.createdAt ? new Date(q.createdAt).toLocaleString() : ''}
                       {q.options && q.options.postalCode ? ` · ${q.options.postalCode}` : ''}
                     </p>
+                    {q.emailStatus && (
+                      <p className={`text-xs font-medium ${q.emailStatus.status === 'sent' ? 'text-success' : q.emailStatus.status === 'failed' ? 'text-danger' : 'text-warning'}`}>
+                        {q.emailStatus.status === 'sent'
+                          ? `✓ Emailed to ${q.emailStatus.to} · ${new Date(q.emailStatus.at).toLocaleString()}`
+                          : q.emailStatus.status === 'fallback'
+                            ? `⚠ Mail draft opened for ${q.emailStatus.to} (direct send not configured) · ${new Date(q.emailStatus.at).toLocaleString()}`
+                            : `✗ Email failed for ${q.emailStatus.to} · ${new Date(q.emailStatus.at).toLocaleString()}`}
+                      </p>
+                    )}
                   </div>
                   <button className="btn btn-sm btn-ghost" onClick={() => reopenHistoryQuote(q)} title="Load this quote back into the quote panel">Reopen</button>
                   <button className="btn btn-sm btn-ghost" onClick={() => duplicateHistoryQuote(q)} title="Copy this quote as the current quote">Duplicate</button>

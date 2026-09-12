@@ -274,6 +274,9 @@ app.put('/api/sync-data', requireSyncKey, async (req, res) => {
       warehouseLocations,
       customDistributors,
       installServiceRates: mergedRates,
+      // Quote history lives only in its own endpoints — never let a catalog
+      // sync push (which doesn't carry it) overwrite it.
+      quoteHistory: (prev && Array.isArray(prev.quoteHistory)) ? prev.quoteHistory : [],
     });
     res.json({ success: true, storage: store.kind });
   } catch (err) {
