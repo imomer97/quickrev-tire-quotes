@@ -20,6 +20,35 @@ const SYNC_KEY = import.meta.env.VITE_SYNC_KEY || 'quickrev-app';
 // same tire across devices and for deletion tombstones.
 const manualSyncKey = (t) => `manual:${t.distributorId || ''}:${String(t.brand || '').toLowerCase()}:${String(t.model || '').toLowerCase()}:${String(t.size || '').toLowerCase()}`;
 
+// Normalize a tire list: unique ids (React keys must never collide — duplicate ids
+// make selecting one card highlight another) and deduped manual entries (re-imports
+// and multi-device pushes leave exact copies; newest wins). Used at load AND after
+// every cloud pull, because the server can hold same-id duplicates pushed by
+// other devices and the pull must not reintroduce them.
+function normalizeTires(list) {
+  if (!Array.isArray(list)) return [];
+  const usedIds = new Set();
+  list = list.map(t => {
+    let id = t.id;
+    if (!id || usedIds.has(id)) id = (id || 'item') + '_' + Math.random().toString(36).slice(2, 8);
+    usedIds.add(id);
+    return { ...t, id };
+  });
+  const byKey = new Map();
+  for (const t of list) {
+    if (t.source !== 'api') {
+      const key = manualSyncKey(t);
+      const existing = byKey.get(key);
+      if (!existing || (t.updatedAt || t.createdAt || '') >= (existing.updatedAt || existing.createdAt || '')) {
+        byKey.set(key, t);
+      }
+    } else {
+      byKey.set(t.id, t);
+    }
+  }
+  return [...byKey.values()];
+}
+
 // ========== CSV NORMALIZATION ==========
 const SEASON_MAP = {
   'all-season': 'All-Season',
@@ -79,34 +108,7 @@ function normalizeDistributor(rawDistributor, distributors = DISTRIBUTORS) {
 export function useTireData() {
   const [tires, setTires] = useState(() => {
     const stored = localStorage.getItem(STORAGE_KEY);
-    let list = stored !== null ? JSON.parse(stored) : [];
-    if (Array.isArray(list)) {
-      // Collapse duplicate entries left by re-imports or multi-device pushes:
-      // manual items sharing a sync key keep the newest copy; identical ids are
-      // rewritten so React keys stay unique (duplicate keys break per-item
-      // selection/edit — selecting one card highlights them all).
-      const byKey = new Map();
-      const usedIds = new Set();
-      list = list.map(t => {
-        let id = t.id;
-        if (!id || usedIds.has(id)) id = (id || 'item') + '_' + Math.random().toString(36).slice(2, 8);
-        usedIds.add(id);
-        return { ...t, id };
-      });
-      for (const t of list) {
-        if (t.source !== 'api') {
-          const key = manualSyncKey(t);
-          const existing = byKey.get(key);
-          if (!existing || (t.updatedAt || t.createdAt || '') >= (existing.updatedAt || existing.createdAt || '')) {
-            byKey.set(key, t);
-          }
-        } else {
-          byKey.set(t.id, t);
-        }
-      }
-      list = [...byKey.values()];
-    }
-    return list;
+    return normalizeTires(stored !== null ? JSON.parse(stored) : []);
   });
 
   const [isLoading, setIsLoading] = useState(false);
@@ -655,7 +657,7 @@ export function useTireData() {
         const lt = merged.get(k);
         if (!lt || (st.updatedAt || '') >= (lt.updatedAt || '')) merged.set(k, st);
       }
-      next = [...next.filter(t => t.source === 'api'), ...merged.values()];
+      next = normalizeTires([...next.filter(t => t.source === 'api'), ...merged.values()]);
 
       // Price/sale overrides for synced Canada Tire tires. The server is
       // authoritative when it has any (a sale cleared on one device clears
