@@ -4,6 +4,7 @@ import logoUrl from '../assets/quickrev-logo.png';
 export default function Header({ activeTab, setActiveTab, syncAllWarehouses, syncAllRunning, syncProgress, isLoading, cloudSyncStatus, onRetryCloudSync }) {
   const tabs = [
     { id: 'search', label: 'Search & Quote', short: 'Search' },
+    { id: 'customers', label: 'Customers', short: 'Customers' },
     { id: 'import', label: 'Import Data', short: 'Import' },
   ];
 

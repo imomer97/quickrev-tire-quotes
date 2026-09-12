@@ -6,6 +6,7 @@ import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
 import pg from 'pg';
+import nodemailer from 'nodemailer';
 
 dotenv.config();
 
@@ -162,45 +163,84 @@ app.delete('/api/quote-history/:id', requireSyncKey, async (req, res) => {
 });
 
 // === SEND QUOTE EMAIL (server-side, PDF attached) ===
-// Uses Resend when RESEND_API_KEY is set. The PDF arrives as a real
-// attachment — no manual download/drag-and-drop needed.
+// Sends via the shop's own mailbox using Titan SMTP (smtp.titan.email:465,
+// SSL) when EMAIL_USER + EMAIL_PASSWORD are set. Falls back to Resend's API
+// if RESEND_API_KEY is present instead (alternative provider). The PDF
+// arrives as a real attachment — no manual download/drag-and-drop needed.
 app.post('/api/send-quote-email', requireSyncKey, async (req, res) => {
-  const { to, subject, html, pdfBase64, filename } = req.body || {};
+  const { to, subject, html, text, pdfBase64, filename } = req.body || {};
   if (!to || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(to)) {
     return res.status(400).json({ success: false, error: 'A valid customer email address is required.' });
   }
   if (!pdfBase64) return res.status(400).json({ success: false, error: 'Missing PDF attachment.' });
 
-  const apiKey = process.env.RESEND_API_KEY;
-  const from = process.env.QUOTE_EMAIL_FROM || 'QuickRev Quotes <quotes@quickrev.ca>';
-  if (!apiKey) {
-    return res.status(501).json({
-      success: false,
-      error: 'Email sending is not configured on the server. Add RESEND_API_KEY (and optionally QUOTE_EMAIL_FROM) in the Render environment settings, then redeploy.',
-    });
+  const emailUser = process.env.EMAIL_USER;
+  const emailPass = process.env.EMAIL_PASSWORD;
+  const resendKey = process.env.RESEND_API_KEY;
+  const fromName = process.env.QUOTE_EMAIL_FROM_NAME || 'QuickRev Quotes';
+  const fromAddr = emailUser || process.env.QUOTE_EMAIL_FROM || 'quotes@quickrev.ca';
+
+  if (!emailUser || !emailPass) {
+    if (!resendKey) {
+      return res.status(501).json({
+        success: false,
+        error: 'Email sending is not configured on the server. Add EMAIL_USER and EMAIL_PASSWORD (Titan mailbox credentials) in the Render environment settings, then redeploy.',
+      });
+    }
+    // Alternative provider: Resend API.
+    try {
+      const response = await fetch('https://api.resend.com/emails', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${resendKey}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          from: `${fromName} <${fromAddr}>`,
+          to: [to],
+          subject: subject || 'Your QuickRev Quote',
+          html: html || '<p>Please find your quote attached.</p>',
+          attachments: [{ filename: filename || 'QuickRev-Quote.pdf', content: pdfBase64 }],
+        }),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        console.error('Resend send failed:', response.status, result);
+        return res.status(response.status).json({ success: false, error: result.message || `Resend error (HTTP ${response.status})` });
+      }
+      return res.json({ success: true, id: result.id, provider: 'resend' });
+    } catch (err) {
+      console.error('send-quote-email failed:', err.message);
+      return res.status(500).json({ success: false, error: err.message });
+    }
   }
 
+  // Titan SMTP (also works for any standard SMTP provider by overriding the
+  // EMAIL_HOST/EMAIL_PORT env vars).
+  const host = process.env.EMAIL_HOST || 'smtp.titan.email';
+  const port = Number(process.env.EMAIL_PORT || 465);
   try {
-    const response = await fetch('https://api.resend.com/emails', {
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        from,
-        to: [to],
-        subject: subject || 'Your QuickRev Quote',
-        html: html || '<p>Please find your quote attached.</p>',
-        attachments: [{ filename: filename || 'QuickRev-Quote.pdf', content: pdfBase64 }],
-      }),
+    const transporter = nodemailer.createTransport({
+      host,
+      port,
+      secure: port === 465,
+      auth: { user: emailUser, pass: emailPass },
+      connectionTimeoutMillis: 15000,
     });
-    const result = await response.json().catch(() => ({}));
-    if (!response.ok) {
-      console.error('Resend send failed:', response.status, result);
-      return res.status(response.status).json({ success: false, error: result.message || `Resend error (HTTP ${response.status})` });
-    }
-    res.json({ success: true, id: result.id });
+    const info = await transporter.sendMail({
+      from: `"${fromName}" <${fromAddr}>`,
+      to,
+      subject: subject || 'Your QuickRev Quote',
+      text: text || (html || '').replace(/<br\s*\/?>/gi, '\n').replace(/<[^>]+>/g, ''),
+      html: html || '<p>Please find your quote attached.</p>',
+      attachments: [{
+        filename: filename || 'QuickRev-Quote.pdf',
+        content: Buffer.from(pdfBase64, 'base64'),
+        contentType: 'application/pdf',
+      }],
+    });
+    console.log(`Quote email sent via ${host} to ${to} (${info.messageId})`);
+    res.json({ success: true, id: info.messageId, provider: host });
   } catch (err) {
-    console.error('send-quote-email failed:', err.message);
-    res.status(500).json({ success: false, error: err.message });
+    console.error('SMTP send failed:', err.message);
+    res.status(502).json({ success: false, error: `Mail server rejected the send: ${err.message}` });
   }
 });
 

@@ -2,10 +2,15 @@ import { useState } from 'react';
 import Header from './components/Header.jsx';
 import SearchPanel from './components/SearchPanel.jsx';
 import ImportPanel from './components/ImportPanel.jsx';
+import CustomersPage from './components/CustomersPage.jsx';
 import { useTireData } from './hooks/useTireData.js';
+import { useQuoteHistory } from './hooks/useQuoteHistory.js';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState('search');
+  // Quote history is shared with the Customers tab; loaded once here and
+  // passed down so both views show the same data.
+  const { quotes: quoteHistory, refresh: refreshQuoteHistory } = useQuoteHistory();
   const {
     tires,
     isLoading,
@@ -63,6 +68,9 @@ export default function App() {
             distributors={distributors}
             onAddDistributor={addDistributor}
           />
+        )}
+        {activeTab === 'customers' && (
+          <CustomersPage quotes={quoteHistory} refreshQuoteHistory={refreshQuoteHistory} />
         )}
         {activeTab === 'import' && (
           <ImportPanel
