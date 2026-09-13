@@ -7,6 +7,8 @@ import fs from 'fs';
 import { fileURLToPath } from 'url';
 import pg from 'pg';
 import nodemailer from 'nodemailer';
+import net from 'net';
+import tls from 'tls';
 
 dotenv.config();
 
@@ -332,44 +334,51 @@ app.post('/api/send-quote-email', requireSyncKey, async (req, res) => {
   }
 
   // Titan SMTP (also works for any standard SMTP provider by overriding the
-  // EMAIL_HOST/EMAIL_PORT env vars). Titan often stalls the FIRST connection
-  // from a datacenter IP but accepts an immediate retry — so each port gets
-  // two quick attempts (8s timeout each), keeping the whole send well inside
-  // the HTTP response window.
+  // EMAIL_HOST/EMAIL_PORT env vars). Titan stalls most connections from
+  // datacenter IPs — sessions hang far beyond nodemailer's soft timeouts —
+  // so each attempt is wrapped in a hard 20s timer and abandoned at the
+  // socket level. The port order is 587 first (STARTTLS, more likely to
+  // complete), then 465. Overall budget: ~45s, inside Render's limits.
   const host = process.env.EMAIL_HOST || 'smtp.titan.email';
   const ports = process.env.EMAIL_PORT
     ? [Number(process.env.EMAIL_PORT), Number(process.env.EMAIL_PORT)]
-    : [465, 465, 587];
+    : [587, 465, 587, 465];
   let lastErr = null;
   for (const port of ports) {
     try {
-      const transporter = nodemailer.createTransport({
-        host,
-        port,
-        secure: port === 465,
-        auth: { user: emailUser, pass: emailPass },
-        connectionTimeoutMillis: 8000,
-        greetingTimeout: 8000,
-        socketTimeout: 15000,
-      });
-      const info = await transporter.sendMail({
-        from: `"${fromName}" <${fromAddr}>`,
-        to,
-        subject: subject || 'Your QuickRev Quote',
-        text: text || (html || '').replace(/<br\s*\/?>/gi, '\n').replace(/<[^>]+>/g, ''),
-        html: html || '<p>Please find your quote attached.</p>',
-        attachments: [{
-          filename: filename || 'QuickRev-Quote.pdf',
-          content: Buffer.from(pdfBase64, 'base64'),
-          contentType: 'application/pdf',
-        }],
-      });
-      console.log(`Quote email sent via ${host}:${port} to ${to} (${info.messageId})`);
-      return res.json({ success: true, id: info.messageId, provider: `${host}:${port}` });
+      const result = await Promise.race([
+        (async () => {
+          const transporter = nodemailer.createTransport({
+            host,
+            port,
+            secure: port === 465,
+            auth: { user: emailUser, pass: emailPass },
+            connectionTimeoutMillis: 8000,
+            greetingTimeout: 8000,
+            socketTimeout: 10000,
+          });
+          const info = await transporter.sendMail({
+            from: `"${fromName}" <${fromAddr}>`,
+            to,
+            subject: subject || 'Your QuickRev Quote',
+            text: text || (html || '').replace(/<br\s*\/?>/gi, '\n').replace(/<[^>]+>/g, ''),
+            html: html || '<p>Please find your quote attached.</p>',
+            attachments: [{
+              filename: filename || 'QuickRev-Quote.pdf',
+              content: Buffer.from(pdfBase64, 'base64'),
+              contentType: 'application/pdf',
+            }],
+          });
+          return info;
+        })(),
+        new Promise((_, rej) => setTimeout(() => rej(new Error(`Hard timeout after 20s on ${host}:${port}`)), 20000)),
+      ]);
+      console.log(`Quote email sent via ${host}:${port} to ${to} (${result.messageId})`);
+      return res.json({ success: true, id: result.messageId, provider: `${host}:${port}` });
     } catch (err) {
       console.error(`SMTP send failed via ${host}:${port}:`, err.message);
       lastErr = err;
-      if (/timeout/i.test(err.message)) continue; // try the next attempt
+      if (/timeout|ETIMEDOUT|ECONN|socket/i.test(err.message)) continue; // try the next port/attempt
       break; // auth/rejection errors won't improve on retry
     }
   }
@@ -377,7 +386,7 @@ app.post('/api/send-quote-email', requireSyncKey, async (req, res) => {
   res.status(blocked ? 504 : 502).json({
     success: false,
     error: blocked
-      ? `Could not reach ${host} from the server (both ports 465 and 587 timed out). Titan is likely blocking or deprioritizing connections from Render's datacenter IPs. Options: (1) use a relay such as SendGrid/Resend/SMTP2GO which publish SMTP ports approved for cloud hosts, or (2) set EMAIL_HOST/EMAIL_PORT on Render to a relay host.`
+      ? `Could not reach ${host} from the server (ports 465 and 587 both stalled). Titan is likely throttling connections from Render's datacenter IPs. The reliable fix is a free SMTP relay (SMTP2GO or Resend) which still sends from info@quickrev.ca — set EMAIL_HOST/EMAIL_PORT on Render to the relay's values.`
       : `Mail server rejected the send: ${lastErr && lastErr.message}`,
   });
 });
