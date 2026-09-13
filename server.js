@@ -332,12 +332,14 @@ app.post('/api/send-quote-email', requireSyncKey, async (req, res) => {
   }
 
   // Titan SMTP (also works for any standard SMTP provider by overriding the
-  // EMAIL_HOST/EMAIL_PORT env vars). Some hosts block outbound 465 — if the
-  // connection times out, automatically retry on 587 (STARTTLS).
+  // EMAIL_HOST/EMAIL_PORT env vars). Titan often stalls the FIRST connection
+  // from a datacenter IP but accepts an immediate retry — so each port gets
+  // two quick attempts (8s timeout each), keeping the whole send well inside
+  // the HTTP response window.
   const host = process.env.EMAIL_HOST || 'smtp.titan.email';
   const ports = process.env.EMAIL_PORT
-    ? [Number(process.env.EMAIL_PORT)]
-    : [465, 587];
+    ? [Number(process.env.EMAIL_PORT), Number(process.env.EMAIL_PORT)]
+    : [465, 465, 587];
   let lastErr = null;
   for (const port of ports) {
     try {
@@ -346,9 +348,9 @@ app.post('/api/send-quote-email', requireSyncKey, async (req, res) => {
         port,
         secure: port === 465,
         auth: { user: emailUser, pass: emailPass },
-        connectionTimeoutMillis: 15000,
-        greetingTimeout: 15000,
-        socketTimeout: 25000,
+        connectionTimeoutMillis: 8000,
+        greetingTimeout: 8000,
+        socketTimeout: 15000,
       });
       const info = await transporter.sendMail({
         from: `"${fromName}" <${fromAddr}>`,
@@ -367,6 +369,8 @@ app.post('/api/send-quote-email', requireSyncKey, async (req, res) => {
     } catch (err) {
       console.error(`SMTP send failed via ${host}:${port}:`, err.message);
       lastErr = err;
+      if (/timeout/i.test(err.message)) continue; // try the next attempt
+      break; // auth/rejection errors won't improve on retry
     }
   }
   const blocked = /timeout|ETIMEDOUT|ECONNREFUSED|EHOSTUNREACH/i.test(lastErr && lastErr.message || '');
