@@ -299,7 +299,10 @@ app.post('/api/send-quote-email', requireSyncKey, async (req, res) => {
   const emailPass = process.env.EMAIL_PASSWORD;
   const resendKey = process.env.RESEND_API_KEY;
   const fromName = process.env.QUOTE_EMAIL_FROM_NAME || 'QuickRev Quotes';
-  const fromAddr = process.env.QUOTE_EMAIL_FROM || emailUser || 'quotes@quickrev.ca';
+  // QUOTE_EMAIL_FROM may be a bare address or a full "Name <addr>" string —
+  // use it verbatim when it already contains the display-name form.
+  const rawFrom = process.env.QUOTE_EMAIL_FROM || emailUser || 'quotes@quickrev.ca';
+  const fromHeader = rawFrom.includes('<') ? rawFrom : `${fromName} <${rawFrom}>`;
 
   // Preferred provider: Resend API (no SMTP connection to stall on — the
   // reliable path from cloud hosts). Takes priority over Titan SMTP whenever
@@ -310,7 +313,7 @@ app.post('/api/send-quote-email', requireSyncKey, async (req, res) => {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${resendKey}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          from: `${fromName} <${fromAddr}>`,
+          from: fromHeader,
           to: [to],
           subject: subject || 'Your QuickRev Quote',
           html: html || '<p>Please find your quote attached.</p>',
