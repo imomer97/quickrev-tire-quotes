@@ -299,16 +299,12 @@ app.post('/api/send-quote-email', requireSyncKey, async (req, res) => {
   const emailPass = process.env.EMAIL_PASSWORD;
   const resendKey = process.env.RESEND_API_KEY;
   const fromName = process.env.QUOTE_EMAIL_FROM_NAME || 'QuickRev Quotes';
-  const fromAddr = emailUser || process.env.QUOTE_EMAIL_FROM || 'quotes@quickrev.ca';
+  const fromAddr = process.env.QUOTE_EMAIL_FROM || emailUser || 'quotes@quickrev.ca';
 
-  if (!emailUser || !emailPass) {
-    if (!resendKey) {
-      return res.status(501).json({
-        success: false,
-        error: 'Email sending is not configured on the server. Add EMAIL_USER and EMAIL_PASSWORD (Titan mailbox credentials) in the Render environment settings, then redeploy.',
-      });
-    }
-    // Alternative provider: Resend API.
+  // Preferred provider: Resend API (no SMTP connection to stall on — the
+  // reliable path from cloud hosts). Takes priority over Titan SMTP whenever
+  // RESEND_API_KEY is set.
+  if (resendKey) {
     try {
       const response = await fetch('https://api.resend.com/emails', {
         method: 'POST',
@@ -326,11 +322,19 @@ app.post('/api/send-quote-email', requireSyncKey, async (req, res) => {
         console.error('Resend send failed:', response.status, result);
         return res.status(response.status).json({ success: false, error: result.message || `Resend error (HTTP ${response.status})` });
       }
+      console.log(`Quote email sent via Resend to ${to} (${result.id})`);
       return res.json({ success: true, id: result.id, provider: 'resend' });
     } catch (err) {
       console.error('send-quote-email failed:', err.message);
       return res.status(500).json({ success: false, error: err.message });
     }
+  }
+
+  if (!emailUser || !emailPass) {
+    return res.status(501).json({
+      success: false,
+      error: 'Email sending is not configured on the server. Add RESEND_API_KEY (preferred) or EMAIL_USER + EMAIL_PASSWORD (Titan mailbox credentials) in the Render environment settings, then redeploy.',
+    });
   }
 
   // Titan SMTP (also works for any standard SMTP provider by overriding the
