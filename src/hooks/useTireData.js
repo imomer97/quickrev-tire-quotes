@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { DISTRIBUTORS, getTierForBrand, SEASONS, calculateRetailPrice } from '../data/distributors.js';
+import { DISTRIBUTORS, getTierForBrand, SEASONS, calculateRetailPrice, setPricingConfig } from '../data/distributors.js';
 
 const STORAGE_KEY = 'quickrev_tire_inventory';
 const LOCATIONS_KEY = 'quickrev_ct_locations';
@@ -189,6 +189,32 @@ export function useTireData() {
   useEffect(() => {
     if (lastSyncAt) localStorage.setItem(LAST_SYNC_KEY, lastSyncAt);
   }, [lastSyncAt]);
+
+  // Pricing mode (retail/wholesale) + markup settings, remembered locally.
+  // IMPORTANT: the module-level config in distributors.js (read synchronously
+  // by every price calculation) must be updated in the SAME tick as the state
+  // change — otherwise the first render after a toggle still shows stale
+  // prices and, with nothing else changing, they never refresh.
+  const [pricingConfig, setPricingConfigState] = useState(() => {
+    try {
+      const stored = localStorage.getItem('quickrev_pricing_config');
+      return stored ? JSON.parse(stored) : null;
+    } catch { return null; }
+  });
+  const pricingConfigRef = useRef(pricingConfig);
+  pricingConfigRef.current = pricingConfig;
+  const DEFAULT_CFG = { wholesale: false, markup: { type: 'flat', value: 10 } };
+  const updatePricingConfig = useCallback((updater) => {
+    const prev = pricingConfigRef.current || DEFAULT_CFG;
+    const next = typeof updater === 'function' ? updater(prev) : updater;
+    setPricingConfig(next || DEFAULT_CFG);
+    setPricingConfigState(next);
+    try { localStorage.setItem('quickrev_pricing_config', JSON.stringify(next)); } catch {}
+  }, []);
+  // Sync the module config once on mount (module default + saved value)
+  useEffect(() => {
+    setPricingConfig(pricingConfig || DEFAULT_CFG);
+  }, []);
 
   // Check Canada Tire API proxy health
   const checkApiHealth = useCallback(async () => {
@@ -830,6 +856,8 @@ export function useTireData() {
     installServiceRates,
     setInstallServiceRates,
     removeDistributor,
+    pricingConfig,
+    setPricingConfig: updatePricingConfig,
     exportData,
     importData,
     installServiceRates,

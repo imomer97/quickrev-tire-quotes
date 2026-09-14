@@ -3,6 +3,7 @@ import Header from './components/Header.jsx';
 import SearchPanel from './components/SearchPanel.jsx';
 import ImportPanel from './components/ImportPanel.jsx';
 import CustomersPage from './components/CustomersPage.jsx';
+import SettingsPage from './components/SettingsPage.jsx';
 import { useTireData } from './hooks/useTireData.js';
 import { useQuoteHistory } from './hooks/useQuoteHistory.js';
 
@@ -44,6 +45,8 @@ export default function App() {
     removeDistributor,
     installServiceRates,
     setInstallServiceRates,
+    pricingConfig,
+    setPricingConfig,
   } = useTireData();
 
   return (
@@ -57,6 +60,8 @@ export default function App() {
         isLoading={isLoading}
         cloudSyncStatus={cloudSyncStatus}
         onRetryCloudSync={retryCloudSync}
+        pricingConfig={pricingConfig}
+        setPricingConfig={setPricingConfig}
       />
       <main className="app-main">
         {activeTab === 'search' && (
@@ -72,10 +77,15 @@ export default function App() {
             onAddDistributor={addDistributor}
             preload={quotePreload}
             onPreloadConsumed={() => setQuotePreload(null)}
+            pricingConfig={pricingConfig}
+            setPricingConfig={setPricingConfig}
           />
         )}
         {activeTab === 'customers' && (
           <CustomersPage quotes={quoteHistory} refreshQuoteHistory={refreshQuoteHistory} onQuoteForCustomer={(payload) => { setQuotePreload(payload); setActiveTab('search'); }} />
+        )}
+        {activeTab === 'settings' && (
+          <SettingsPage pricingConfig={pricingConfig} setPricingConfig={setPricingConfig} />
         )}
         {activeTab === 'import' && (
           <ImportPanel

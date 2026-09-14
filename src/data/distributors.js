@@ -5,6 +5,51 @@ export const ENV_FEE_PER_TIRE = 4.50;
 // ========== MARKUP ==========
 export const MARKUP_PER_TIRE = 10.00;
 
+// ========== PRICING MODE (retail / B2B) & MARKUP SETTINGS ==========
+// Global pricing configuration:
+// - `wholesale` (B2B toggle on the search page) halves the markup for business
+//   pricing. Purchase cost (wholesale + env fee) is NEVER modified.
+// - `markup` defines the standard markup applied to computed prices: either a
+//   flat dollar rate (default $10/tire) or a percentage of the purchase cost.
+//   Per-item markup overrides on item cards always win over this.
+// Managed from the Settings page + quote toolbar.
+export const DEFAULT_PRICING_CONFIG = {
+  wholesale: false,
+  markup: { type: 'flat', value: MARKUP_PER_TIRE },   // type: 'flat' | 'percent'
+};
+
+let pricingConfig = { ...DEFAULT_PRICING_CONFIG, markup: { ...DEFAULT_PRICING_CONFIG.markup } };
+
+export function getPricingConfig() {
+  return pricingConfig;
+}
+
+export function setPricingConfig(next) {
+  pricingConfig = {
+    ...pricingConfig,
+    ...(next || {}),
+    markup: { ...pricingConfig.markup, ...((next && next.markup) || {}) },
+  };
+}
+
+/**
+ * The effective markup for an item: per-item override > global markup setting
+ * (flat $ or % of purchase cost). In B2B (wholesale) mode the result is halved.
+ * Purchase cost itself is never touched.
+ */
+export function getEffectiveMarkup(purchaseCost, item) {
+  let markup;
+  if (item && item.markupOverride != null && Number.isFinite(parseFloat(item.markupOverride))) {
+    markup = parseFloat(item.markupOverride);
+  } else {
+    const cfg = pricingConfig.markup;
+    markup = cfg.type === 'percent'
+      ? purchaseCost * (parseFloat(cfg.value) || 0) / 100
+      : (parseFloat(cfg.value) || 0);
+  }
+  return pricingConfig.wholesale ? markup / 2 : markup;
+}
+
 // ========== HST NS ==========
 export const HST_RATE = 0.14;
 
@@ -150,12 +195,8 @@ export function calculatePurchaseCost(wholesale, item) {
  */
 export function calculateRetailPrice(wholesale, item) {
   const purchaseCost = calculatePurchaseCost(wholesale, item);
-  // Per-item markup override wins; otherwise tires use the standard markup and
-  // wheels/parts carry no markup by default.
-  const markup = item && item.markupOverride != null && Number.isFinite(parseFloat(item.markupOverride))
-    ? parseFloat(item.markupOverride)
-    : (getCategory(item) === 'tire' ? MARKUP_PER_TIRE : 0);
-  return purchaseCost + markup;
+  // Markup only — purchase cost is never modified by pricing settings
+  return purchaseCost + getEffectiveMarkup(purchaseCost, item);
 }
 
 /**

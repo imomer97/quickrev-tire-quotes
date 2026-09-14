@@ -125,7 +125,8 @@ import {
 import { generateOptionsPDF } from '../utils/pdfGenerator.js';
 import { useQuoteHistory, loadEmailTemplate, saveEmailTemplate, renderEmailTemplate, DEFAULT_EMAIL_TEMPLATE } from '../hooks/useQuoteHistory.js';
 
-export default function SearchPanel({ tires, updateTire, deleteTire, addTire, bulkUpdateTires, warehouseLocations, distributors, onAddDistributor, preload, onPreloadConsumed }) {
+export default function SearchPanel({ tires, updateTire, deleteTire, addTire, bulkUpdateTires, warehouseLocations, distributors, onAddDistributor, preload, onPreloadConsumed, pricingConfig, setPricingConfig }) {
+  const isB2B = !!(pricingConfig && pricingConfig.wholesale);
   // === SEARCH & FILTERS ===
   const [searchSize, setSearchSize] = useState('');
   const [quantity, setQuantity] = useState(4);
@@ -2778,7 +2779,8 @@ ${stockText}
 
                 {/* FIXED: Price Breakdown with Installation Tax Included */}
                 <div className="bg-slate-50 rounded-lg p-3 mb-3">
-                  <p className="text-xs font-semibold text-muted mb-2 uppercase tracking-wide">Cost Breakdown (per item)</p>
+                  <p className="text-xs font-semibold mb-2 uppercase tracking-wide" style={{ color: isB2B ? '#16a34a' : undefined }}>
+                    Cost Breakdown (per item){isB2B && ' — B2B'}</p>
 
                   {/* Tire Only */}
                   <div className="price-row">

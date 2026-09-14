@@ -1,10 +1,12 @@
 import { Settings, RefreshCw, Cloud, CloudOff } from 'lucide-react';
 import logoUrl from '../assets/quickrev-logo.png';
 
-export default function Header({ activeTab, setActiveTab, syncAllWarehouses, syncAllRunning, syncProgress, isLoading, cloudSyncStatus, onRetryCloudSync }) {
+export default function Header({ activeTab, setActiveTab, syncAllWarehouses, syncAllRunning, syncProgress, isLoading, cloudSyncStatus, onRetryCloudSync, pricingConfig, setPricingConfig }) {
+  const isB2B = !!(pricingConfig && pricingConfig.wholesale);
   const tabs = [
     { id: 'search', label: 'Search & Quote', short: 'Search' },
     { id: 'customers', label: 'Customers', short: 'Customers' },
+    { id: 'settings', label: 'Settings', short: 'Settings' },
     { id: 'import', label: 'Import Data', short: 'Import' },
   ];
 
@@ -35,6 +37,43 @@ export default function Header({ activeTab, setActiveTab, syncAllWarehouses, syn
         </div>
 
         <div className="flex items-center gap-2">
+          {/* B2B pricing switch — in the header so it's visible on every tab
+              and never overlaps the sync controls. */}
+          <div
+            onClick={() => setPricingConfig(c => ({ ...c, wholesale: !c.wholesale }))}
+            title="B2B (wholesale) pricing — halves the markup. Retail prices otherwise."
+            role="switch"
+            aria-checked={isB2B}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 8,
+              background: '#fff', border: isB2B ? '2px solid #16a34a' : '1px solid #cbd5e1',
+              borderRadius: 999, padding: '4px 10px', cursor: 'pointer', userSelect: 'none',
+            }}
+          >
+            <span
+              style={{
+                width: 36, height: 18, borderRadius: 999, position: 'relative',
+                background: isB2B ? '#16a34a' : '#cbd5e1', transition: 'background 0.15s',
+                flexShrink: 0, display: 'inline-block',
+              }}
+            >
+              <span
+                style={{
+                  position: 'absolute', top: 2, left: isB2B ? 20 : 2,
+                  width: 14, height: 14, borderRadius: '50%', background: '#fff',
+                  boxShadow: '0 1px 3px rgba(0,0,0,0.3)', transition: 'left 0.15s',
+                }}
+              />
+            </span>
+            <span
+              style={{
+                fontSize: '0.75rem', fontWeight: 700,
+                color: isB2B ? '#16a34a' : '#64748b', whiteSpace: 'nowrap',
+              }}
+            >
+              {isB2B ? 'B2B' : 'RETAIL'}
+            </span>
+          </div>
           {/* Cloud sync for manual tires & edits (visible on every tab so a
               failed push is obvious instead of silently dropping items). */}
           {(() => {
