@@ -302,6 +302,7 @@ body {
 .badge-yellow { background: #fef3c7; color: #b45309; }
 .badge-red { background: #fee2e2; color: #b91c1c; }
 .badge-purple { background: #f3e8ff; color: #7c3aed; }
+.badge-orange { background: #ffedd5; color: #c2410c; }
 .badge-gray { background: #f1f5f9; color: #475569; }
 
 /* Category badges — colour-coded so the customer can scan tires / wheels / parts */

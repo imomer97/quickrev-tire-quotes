@@ -94,7 +94,7 @@ export const VEHICLE_LABELS = {
 };
 
 // ========== SEASONS ==========
-export const SEASONS = ['All-Season', 'Winter', 'All-Weather', 'All-Terrain', 'None'];
+export const SEASONS = ['All-Season', 'Winter', 'All-Weather', 'All-Terrain', 'Rugged Terrain', 'None'];
 
 // ========== PRODUCT CATEGORIES ==========
 // The app handles tires, wheels/rims (steel & alloy), and general auto parts.
@@ -398,6 +398,27 @@ export function formatSize(sizeStr, item) {
     return parts.join(' ').toUpperCase();
   }
   return sizeStr ? sizeStr.toUpperCase() : '';
+}
+
+/**
+ * Metric equivalent of an imperial (flotation) tire size, e.g.
+ * "35X12.50R20" → "318/65R20". Returns null for non-imperial sizes.
+ * Conversion: width_mm = width_in * 25.4; sidewall = (OD − rim) / 2;
+ * aspect = sidewall / width_mm * 100 (rounded to nearest 5); rim = rim_in.
+ */
+export function imperialToMetric(sizeStr) {
+  if (!sizeStr) return null;
+  const m = String(sizeStr).toUpperCase().replace(/\s/g, '').match(/^(\d{1,2}(?:\.\d{1,2})?)[X\/](\d{1,2}(?:\.\d{1,2})?)(?:R|LT)?(\d{2})$/);
+  if (!m) return null;
+  const od = parseFloat(m[1]);       // overall diameter (in)
+  const widthIn = parseFloat(m[2]); // section width (in)
+  const rim = parseInt(m[3], 10);
+  if (!Number.isFinite(od) || !Number.isFinite(widthIn) || !rim) return null;
+  const widthMm = Math.round(widthIn * 25.4);
+  const sidewallIn = (od - rim) / 2;
+  let aspect = Math.round((sidewallIn * 25.4) / widthMm * 100 / 5) * 5;
+  aspect = Math.min(Math.max(aspect, 20), 100);
+  return `${widthMm}/${aspect}R${rim}`;
 }
 
 // ========== SALE PRICING ==========

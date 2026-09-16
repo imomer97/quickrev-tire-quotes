@@ -315,7 +315,7 @@ export function generateOptionsPDF({
         [col.category]: { cellWidth: 11 },
         [col.brand]: { cellWidth: 22 },
         [col.size]: { cellWidth: 27 },
-        [col.season]: { cellWidth: 17 },
+        [col.season]: { cellWidth: 20 },
         [col.stock]: { cellWidth: 11 },
         [col.price]: { cellWidth: 16 },
       }
@@ -324,7 +324,7 @@ export function generateOptionsPDF({
           [col.category]: { cellWidth: 10 },
           [col.brand]: { cellWidth: 22 },
           [col.size]: { cellWidth: 29 },
-          [col.season]: { cellWidth: 18 },
+          [col.season]: { cellWidth: 20 },
           [col.stock]: { cellWidth: 10 },
           [col.price]: { cellWidth: 15 },
         }
@@ -332,7 +332,7 @@ export function generateOptionsPDF({
           [col.category]: { cellWidth: 15 },
           [col.brand]: { cellWidth: 22 },
           [col.size]: { cellWidth: 27 },
-          [col.season]: { cellWidth: 17 },
+          [col.season]: { cellWidth: 20 },
           [col.stock]: { cellWidth: 12 },
           [col.price]: { cellWidth: 17 },
         };

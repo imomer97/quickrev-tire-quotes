@@ -55,6 +55,10 @@ const SEASON_MAP = {
   'winter': 'Winter',
   'all-weather': 'All-Weather',
   'all-terrain': 'All-Terrain',
+  'rugged-terrain': 'Rugged Terrain',
+  'rugged terrain': 'Rugged Terrain',
+  'ruggedterrain': 'Rugged Terrain',
+  'r/t': 'Rugged Terrain',
 };
 
 /**
@@ -293,7 +297,10 @@ export function useTireData() {
         let parsedSize = String(item.size || '').trim();
         if (parsedSize) {
           parsedSize = parsedSize.replace(/,/g, '');
-          if (parsedSize.length >= 7) {
+          // Only reformat pure-digit metric sizes ("2355019" → "235/50R19").
+          // Imperial sizes ("35X1250R20", "35X12.50R20") contain letters/decimals
+          // and must be kept as-is — slicing them into W/AR form corrupts them.
+          if (/^\d+$/.test(parsedSize) && parsedSize.length >= 7) {
             const w = parsedSize.slice(0, 3);
             const a = parsedSize.slice(3, 5);
             const r = parsedSize.slice(5, 7);

@@ -100,13 +100,26 @@ export default function ImportPanel({ tires, importFromCSV, clearAll, loadSample
   // 205/55R16, 20555R16, 2055516, P205/55R16, 205/55ZR16, 205 55 16, etc.
   const parseSyncSize = (raw) => {
     const cleaned = raw.trim().toUpperCase();
-    const match = cleaned.match(/^(?:P)?(\d{3})\D*(\d{2,3})(?:[A-Z]?R)?(\d{2})$/);
-    if (!match) return null;
-    return {
-      width: parseInt(match[1], 10),
-      aspect: parseInt(match[2], 10),
-      rim: parseInt(match[3], 10),
-    };
+    // Metric: 205/55R16, 20555R16, 2055516, P205/55R16, etc.
+    const metric = cleaned.match(/^(?:P)?(\d{3})\D*(\d{2,3})(?:[A-Z]?R)?(\d{2})$/);
+    if (metric) {
+      return {
+        width: parseInt(metric[1], 10),
+        aspect: parseInt(metric[2], 10),
+        rim: parseInt(metric[3], 10),
+      };
+    }
+    // Imperial / flotation: 35X12.50R20, 35x12.5R20, 33/12.50R15, etc.
+    const imperial = cleaned.match(/^(\d{1,2})[X\/ ](\d{1,2}(?:\.\d{1,2})?)[X\/ ]?(?:R|LT)?(\d{2})$/);
+    if (imperial) {
+      return {
+        imperial: true,
+        diameter: parseInt(imperial[1], 10),
+        width: parseFloat(imperial[2]),
+        rim: parseInt(imperial[3], 10),
+      };
+    }
+    return null;
   };
 
   const handleSync = async () => {
@@ -114,7 +127,11 @@ export default function ImportPanel({ tires, importFromCSV, clearAll, loadSample
     const filters = {};
     if (syncFilters.size) {
       const parsed = parseSyncSize(syncFilters.size);
-      if (parsed) {
+      if (parsed && parsed.imperial) {
+        // Imperial sizes have no metric width/aspect — send a normalized size
+        // string the API can text-match, e.g. "35X12.50R20" → "35X1250R20".
+        filters.size = `${parsed.diameter}X${parsed.width}R${parsed.rim}`.replace(/\./g, '').toUpperCase();
+      } else if (parsed) {
         filters.width = parsed.width;
         filters.aspectRatio = parsed.aspect;
         filters.rimSize = parsed.rim;
@@ -467,7 +484,7 @@ export default function ImportPanel({ tires, importFromCSV, clearAll, loadSample
                     <td className="py-2 pr-4 text-muted">{tire.model}</td>
                     <td className="py-2 pr-4">{tire.size}</td>
                     <td className="py-2 pr-4">
-                      <span className={`badge badge-${tire.season === 'Winter' ? 'blue' : tire.season === 'All-Season' ? 'green' : tire.season === 'All-Weather' ? 'purple' : 'yellow'}`}>{tire.season}</span>
+                      <span className={`badge badge-${tire.season === 'Winter' ? 'blue' : tire.season === 'All-Season' ? 'green' : tire.season === 'All-Weather' ? 'purple' : tire.season === 'Rugged Terrain' ? 'orange' : 'yellow'}`}>{tire.season}</span>
                     </td>
                     <td className="py-2 pr-4 text-muted">{tire.distributorId}</td>
                     <td className="py-2 pr-4">

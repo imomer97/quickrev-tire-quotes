@@ -109,6 +109,7 @@ import {
   parseTireSize,
   parseWheelSize,
   formatSize,
+  imperialToMetric,
   formatCurrency,
   ENV_FEE_PER_TIRE,
   MARKUP_PER_TIRE,
@@ -129,6 +130,10 @@ export default function SearchPanel({ tires, updateTire, deleteTire, addTire, bu
   const isB2B = !!(pricingConfig && pricingConfig.wholesale);
   // === SEARCH & FILTERS ===
   const [searchSize, setSearchSize] = useState('');
+  // Show metric equivalents next to imperial (flotation) sizes on cards,
+  // e.g. "35X12.50R20 · 318/60R20" — helps customers cross-reference sizes.
+  const [showMetricEquiv, setShowMetricEquiv] = useState(() => localStorage.getItem('quickrev_show_metric_equiv') === '1');
+  useEffect(() => { localStorage.setItem('quickrev_show_metric_equiv', showMetricEquiv ? '1' : '0'); }, [showMetricEquiv]);
   const [quantity, setQuantity] = useState(4);
   const [activeDistributors, setActiveDistributors] = useState(new Set());
   // Canada Tire shows one option per synced warehouse (e.g. "Canada Tire —
@@ -466,8 +471,22 @@ export default function SearchPanel({ tires, updateTire, deleteTire, addTire, bu
         const sizeMatch = normSizeMatch || numericMatch || tire.size.toLowerCase().includes(searchLower);
         const brandMatch = tire.brand.toLowerCase().includes(searchLower);
         const modelMatch = tire.model.toLowerCase().includes(searchLower);
+
+        // Imperial→metric equivalence: searching "35X12.50R20" also matches
+        // tires stored as its metric equivalent (318/60R20), since flotation-
+        // size customers can use either interchangeably on the same rim.
+        let equivMatch = false;
+        if (!sizeMatch && !brandMatch && !modelMatch) {
+          const metric = imperialToMetric(searchSize);
+          if (metric) {
+            const metricNorm = normalizeTireSize(metric);
+            const metricNum = normalizeTireSizeNumeric(metric);
+            equivMatch = (metricNorm.length > 0 && normalizedTireSize.includes(metricNorm))
+              || (metricNum.length > 0 && numericTireSize.includes(metricNum));
+          }
+        }
         
-        if (!sizeMatch && !brandMatch && !modelMatch) return false;
+        if (!sizeMatch && !brandMatch && !modelMatch && !equivMatch) return false;
       }
       // Distributor — general options plus per-warehouse Canada Tire options.
       // When NO distributor is selected, search globally across all of them
@@ -1225,6 +1244,16 @@ ${stockText}
       {/* === SEARCH BAR & ADD TIRE === */}
       <div className="card p-6">
         <div className="flex flex-col gap-4">
+          {/* Live equivalence hint: typing an imperial (flotation) size shows its
+              metric conversion instantly, e.g. "35X12.50R20 → also matching 318/60R20".
+              Reverse direction too: typing a metric size shows the closest flotation size. */}
+          {searchSize && imperialToMetric(searchSize) ? (
+            <p className="text-xs text-muted -mb-1">
+              <span className="font-semibold">Equivalent size:</span>{' '}
+              <span className="font-mono">{imperialToMetric(searchSize)}</span>
+              {' '}(metric tires with this size are included in the results)
+            </p>
+          ) : null}
           <div className="flex gap-3 flex-wrap">
             <div className="relative flex-1 min-w-64">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-muted" />
@@ -1333,6 +1362,15 @@ ${stockText}
                     onChange={(e) => setMinStock(Math.max(0, parseInt(e.target.value) || 0))}
                   />
                 </div>
+                <label className="flex items-center gap-2 cursor-pointer" title="Show metric equivalents next to imperial sizes, e.g. 35X12.50R20 · 318/60R20">
+                  <input
+                    type="checkbox"
+                    checked={showMetricEquiv}
+                    onChange={(e) => setShowMetricEquiv(e.target.checked)}
+                    className="rounded"
+                  />
+                  <span className="text-sm">Metric equiv.</span>
+                </label>
               </div>
             </div>
 
@@ -2571,7 +2609,12 @@ ${stockText}
                     {CATEGORIES[getCategory(tire)]}
                   </span>
                   {!isEditing ? (
-                    <span className="badge badge-gray font-mono">{formatSize(tire.size, tire)}</span>
+                    <span className="badge badge-gray font-mono">
+                      {formatSize(tire.size, tire)}
+                      {showMetricEquiv && imperialToMetric(tire.size) ? (
+                        <span className="text-muted"> · {imperialToMetric(tire.size)}</span>
+                      ) : null}
+                    </span>
                   ) : (
                     <input
                       className="input text-sm w-32 font-mono"
@@ -2630,6 +2673,7 @@ ${stockText}
                     tire.season === 'Winter' ? 'blue' :
                     tire.season === 'All-Season' ? 'green' :
                     tire.season === 'All-Weather' ? 'purple' :
+                    tire.season === 'Rugged Terrain' ? 'orange' :
                     'yellow'
                   }`}>
                     {!isEditing ? tire.season : (
