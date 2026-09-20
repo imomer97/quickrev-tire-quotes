@@ -9,3 +9,8 @@ QuickRev-Tire-Options-*.pdf
 
 # Local cloud-sync fallback (dev only)
 sync-state.json
+
+# Local-generated artifacts (quotes PDFs, logo experiments)
+QuickRev-Options-*.pdf
+logo-assets/
+logo-animation-test.html
