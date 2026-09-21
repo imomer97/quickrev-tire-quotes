@@ -480,6 +480,27 @@ app.put('/api/sync-data', requireSyncKey, async (req, res) => {
   }
 });
 
+// One-time restore: replace the shared store with a full backup payload
+// (used when migrating to a fresh database). Refuses partial payloads so a
+// bad curl can't wipe a live store. Lock behind a separate env key.
+app.post('/api/restore-store', async (req, res) => {
+  const key = process.env.RESTORE_KEY || '';
+  if (!key || (req.get('x-restore-key') || '') !== key) {
+    return res.status(401).json({ success: false, error: 'Invalid restore key.' });
+  }
+  const payload = req.body || {};
+  if (!Array.isArray(payload.manualTires) || typeof payload.overrides !== 'object' || payload.overrides === null) {
+    return res.status(400).json({ success: false, error: 'Payload does not look like a full backup (manualTires + overrides required).' });
+  }
+  try {
+    await store.write(payload);
+    const check = await store.read();
+    res.json({ success: true, storage: store.kind, manualTires: (check.manualTires || []).length, quotes: (check.quoteHistory || []).length, customers: Object.keys(check.customers || {}).length });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 /**
  * Generate OAuth 1.0 signature for NetSuite TBA
  * Try WITHOUT realm in signature to see if error changes
