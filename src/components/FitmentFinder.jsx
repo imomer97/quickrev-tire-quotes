@@ -1,0 +1,278 @@
+import { useMemo, useState } from 'react';
+import { Search, Plus, Check, Car, X } from 'lucide-react';
+
+/**
+ * Fitment Finder — search by year / make / model / trim to get the stock SKU
+ * for each possible rim size on that vehicle, set a wholesale rate on any
+ * result, and add it as a new catalog item (skipped if already added).
+ *
+ * The fitment database lives in the cloud sync store (server-side), so it is
+ * shared across devices like the rest of the catalog. `fitments` and
+ * `onAddFitment` come from useTireData (synced via the warehouseLocations-style
+ * list inside the shared store payload).
+ */
+
+function normalize(s) {
+  return String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
+export default function FitmentFinder({ fitments = [], onAddFitment, addTire, tires = [], distributorId = 'canadaTire' }) {
+  const [year, setYear] = useState('');
+  const [make, setMake] = useState('');
+  const [model, setModel] = useState('');
+  const [trim, setTrim] = useState('');
+  const [wholesaleBySku, setWholesaleBySku] = useState({});
+  const [addedSkus, setAddedSkus] = useState({});
+
+  const years = useMemo(() => {
+    const set = new Set();
+    for (const f of fitments) if (f.year) set.add(String(f.year));
+    return [...set].sort((a, b) => b - a);
+  }, [fitments]);
+
+  const makes = useMemo(() => {
+    const set = new Set();
+    for (const f of fitments) {
+      if (year && String(f.year) !== year) continue;
+      if (f.make) set.add(f.make);
+    }
+    return [...set].sort();
+  }, [fitments, year]);
+
+  const models = useMemo(() => {
+    const set = new Set();
+    for (const f of fitments) {
+      if (year && String(f.year) !== year) continue;
+      if (make && f.make !== make) continue;
+      if (f.model) set.add(f.model);
+    }
+    return [...set].sort();
+  }, [fitments, year, make]);
+
+  const trims = useMemo(() => {
+    const set = new Set();
+    for (const f of fitments) {
+      if (year && String(f.year) !== year) continue;
+      if (make && f.make !== make) continue;
+      if (model && f.model !== model) continue;
+      if (f.trim) set.add(f.trim);
+    }
+    return [...set].sort();
+  }, [fitments, year, make, model]);
+
+  const results = useMemo(() => {
+    const y = normalize(year), ma = normalize(make), mo = normalize(model), t = normalize(trim);
+    return fitments.filter(f => {
+      if (y && normalize(f.year) !== y) return false;
+      if (ma && normalize(f.make) !== ma) return false;
+      if (mo && !(normalize(f.model) || '').includes(mo)) return false;
+      if (t && !(normalize(f.trim) || '').includes(t)) return false;
+      return true;
+    });
+  }, [fitments, year, make, model, trim]);
+
+  // Aggregate: one row per rim size with its SKU(s)
+  const rows = useMemo(() => {
+    const byRim = new Map();
+    for (const f of results) {
+      const rim = f.rimSize || f.rim || '';
+      if (!rim) continue;
+      const key = String(rim);
+      if (!byRim.has(key)) {
+        byRim.set(key, { rimSize: key, skus: new Set(), sources: new Set() });
+      }
+      const row = byRim.get(key);
+      if (f.sku) row.skus.add(f.sku);
+      if (f.source) row.sources.add(f.source);
+      if (f.boltPattern) row.boltPattern = f.boltPattern;
+      if (f.offset) row.offset = f.offset;
+      if (f.width) row.width = f.width;
+    }
+    return [...byRim.values()].map(r => ({ ...r, skus: [...r.skus], sources: [...r.sources] })).sort((a, b) => parseInt(a.rimSize) - parseInt(b.rimSize));
+  }, [results]);
+
+  const alreadyAdded = (sku, rimSize) => {
+    return tires.some(t => {
+      const hay = `${t.sku || ''} ${t.model || ''} ${t.size || ''}`.toLowerCase();
+      if (sku && hay.includes(String(sku).toLowerCase())) return true;
+      return normalize(t.size) === normalize(rimSize) && t.category === 'wheel';
+    });
+  };
+
+  const handleAdd = (row) => {
+    const sku = row.skus[0] || `${normalize(make)}-${row.rimSize}`;
+    const ws = parseFloat(wholesaleBySku[row.rimSize]) || 0;
+    const exists = alreadyAdded(sku, row.rimSize);
+    if (exists) {
+      setAddedSkus(a => ({ ...a, [row.rimSize]: 'exists' }));
+      return;
+    }
+    addTire({
+      brand: make || 'OEM',
+      model: `${year} ${make} ${model}${trim ? ` ${trim}` : ''}`.trim(),
+      size: `${row.rimSize}X${row.width || '7'}` + (row.offset != null ? ` ${row.offset}` : '') + (row.boltPattern ? ` ${row.boltPattern}` : ''),
+      wholesale: ws,
+      stock: 0,
+      season: 'None',
+      category: 'wheel',
+      distributorId,
+      sku,
+      notes: `Fitment: ${year} ${make} ${model}${trim ? ` ${trim}` : ''} — rim ${row.rimSize}"`,
+      wholesaleOverride: ws,
+    });
+    setAddedSkus(a => ({ ...a, [row.rimSize]: 'added' }));
+  };
+
+  const label = 'text-sm font-medium mb-1 block text-primary';
+  const inputCls = 'input w-full';
+
+  return (
+    <div className="p-4 md:p-6 max-w-5xl mx-auto">
+      <div className="flex items-center gap-2 mb-1">
+        <Car className="w-6 h-6 text-primary" />
+        <h2 className="text-xl font-bold text-primary">Fitment Finder</h2>
+      </div>
+      <p className="text-sm text-muted mb-4">
+        Search by vehicle to see every possible rim size and its SKU. Set a wholesale rate per result, then add it as a catalog item — items that already exist are skipped.
+      </p>
+
+      {/* Search form */}
+      <div className="card p-4 mb-5 grid grid-cols-2 md:grid-cols-4 gap-3">
+        <div>
+          <label className={label}>Year</label>
+          <select className={inputCls} value={year} onChange={e => { setYear(e.target.value); setMake(''); setModel(''); setTrim(''); }}>
+            <option value="">Any</option>
+            {years.map(y => <option key={y} value={y}>{y}</option>)}
+          </select>
+        </div>
+        <div>
+          <label className={label}>Make</label>
+          <select className={inputCls} value={make} onChange={e => { setMake(e.target.value); setModel(''); setTrim(''); }}>
+            <option value="">Any</option>
+            {makes.map(m => <option key={m} value={m}>{m}</option>)}
+          </select>
+        </div>
+        <div>
+          <label className={label}>Model</label>
+          <select className={inputCls} value={model} onChange={e => { setModel(e.target.value); setTrim(''); }}>
+            <option value="">Any</option>
+            {models.map(m => <option key={m} value={m}>{m}</option>)}
+          </select>
+        </div>
+        <div>
+          <label className={label}>Trim</label>
+          <select className={inputCls} value={trim} onChange={e => setTrim(e.target.value)}>
+            <option value="">Any</option>
+            {trims.map(t => <option key={t} value={t}>{t}</option>)}
+          </select>
+        </div>
+      </div>
+
+      {/* Results */}
+      {rows.length === 0 ? (
+        <div className="card p-6 text-center text-muted">
+          <Search className="w-8 h-8 mx-auto mb-2 opacity-40" />
+          <p>No fitment data matches. Add vehicles via Import or the cloud sync.</p>
+        </div>
+      ) : (
+        <div className="card overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="text-left border-b border-slate-200 text-xs uppercase text-muted">
+                <th className="px-3 py-2">Rim Size</th>
+                <th className="px-3 py-2">Spec</th>
+                <th className="px-3 py-2">SKU</th>
+                <th className="px-3 py-2 w-32">Wholesale</th>
+                <th className="px-3 py-2"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map(row => {
+                const state = addedSkus[row.rimSize];
+                const exists = alreadyAdded(row.skus[0], row.rimSize);
+                return (
+                  <tr key={row.rimSize} className="border-b border-slate-100 last:border-0">
+                    <td className="px-3 py-2 font-bold text-primary">{row.rimSize}"</td>
+                    <td className="px-3 py-2 text-muted">
+                      {row.width ? `${row.rimSize}×${row.width}` : ''}{row.offset != null ? ` ET${row.offset}` : ''}{row.boltPattern ? ` ${row.boltPattern}` : ''}
+                    </td>
+                    <td className="px-3 py-2 font-mono text-xs">{row.skus.join(', ') || '—'}</td>
+                    <td className="px-3 py-2">
+                      <input
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        className="input w-28"
+                        placeholder="$"
+                        value={wholesaleBySku[row.rimSize] ?? ''}
+                        onChange={e => setWholesaleBySku(w => ({ ...w, [row.rimSize]: e.target.value }))}
+                      />
+                    </td>
+                    <td className="px-3 py-2 text-right">
+                      <button
+                        className="btn btn-sm text-white bg-green-600 hover:bg-green-700 inline-flex items-center gap-1"
+                        onClick={() => handleAdd(row)}
+                        disabled={state === 'added' || state === 'exists'}
+                        title={exists ? 'Already in catalog' : 'Add as a new wheel item'}
+                      >
+                        {state === 'added' ? <><Check className="w-4 h-4" /> Added</>
+                          : state === 'exists' ? <><X className="w-4 h-4" /> In catalog</>
+                          : <><Plus className="w-4 h-4" /> Add item</>}
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* Manual fitment entry — so the DB can grow without a CSV */}
+      <ManualFitmentForm onAddFitment={onAddFitment} years={years} />
+    </div>
+  );
+}
+
+function ManualFitmentForm({ onAddFitment, years }) {
+  const [open, setOpen] = useState(false);
+  const [form, setForm] = useState({ year: '', make: '', model: '', trim: '', rimSize: '', width: '', offset: '', boltPattern: '', sku: '' });
+  const label = 'text-sm font-medium mb-1 block text-primary';
+  const inputCls = 'input w-full';
+  const set = (k) => (e) => setForm(f => ({ ...f, [k]: e.target.value }));
+
+  const submit = (e) => {
+    e.preventDefault();
+    if (!form.year || !form.make || !form.model || !form.rimSize) return;
+    onAddFitment({ ...form, year: parseInt(form.year, 10) });
+    setForm(f => ({ ...f, rimSize: '', width: '', offset: '', boltPattern: '', sku: '' }));
+  };
+
+  if (!open) {
+    return (
+      <button className="btn btn-sm mt-4" onClick={() => setOpen(true)}>
+        <Plus className="w-4 h-4" /> Add fitment manually
+      </button>
+    );
+  }
+  return (
+    <form className="card p-4 mt-5 grid grid-cols-2 md:grid-cols-4 gap-3" onSubmit={submit}>
+      <div className="col-span-2 md:col-span-4 flex items-center justify-between">
+        <h3 className="font-bold text-primary">Add fitment entry</h3>
+        <button type="button" className="btn btn-ghost btn-sm" onClick={() => setOpen(false)}>Close</button>
+      </div>
+      <div><label className={label}>Year *</label><input className={inputCls} value={form.year} onChange={set('year')} placeholder="2020" /></div>
+      <div><label className={label}>Make *</label><input className={inputCls} value={form.make} onChange={set('make')} placeholder="Honda" /></div>
+      <div><label className={label}>Model *</label><input className={inputCls} value={form.model} onChange={set('model')} placeholder="Civic" /></div>
+      <div><label className={label}>Trim</label><input className={inputCls} value={form.trim} onChange={set('trim')} placeholder="LX" /></div>
+      <div><label className={label}>Rim size (in) *</label><input className={inputCls} value={form.rimSize} onChange={set('rimSize')} placeholder="17" /></div>
+      <div><label className={label}>Width</label><input className={inputCls} value={form.width} onChange={set('width')} placeholder="7" /></div>
+      <div><label className={label}>Offset</label><input className={inputCls} value={form.offset} onChange={set('offset')} placeholder="45" /></div>
+      <div><label className={label}>Bolt pattern</label><input className={inputCls} value={form.boltPattern} onChange={set('boltPattern')} placeholder="5x114.3" /></div>
+      <div><label className={label}>SKU</label><input className={inputCls} value={form.sku} onChange={set('sku')} placeholder="OEM SKU" /></div>
+      <div className="col-span-2 md:col-span-4">
+        <button type="submit" className="btn btn-sm text-white bg-green-600 hover:bg-green-700">Save fitment</button>
+      </div>
+    </form>
+  );
+}

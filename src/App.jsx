@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import Header from './components/Header.jsx';
 import SearchPanel from './components/SearchPanel.jsx';
+import FitmentFinder from './components/FitmentFinder.jsx';
 import ImportPanel from './components/ImportPanel.jsx';
 import CustomersPage from './components/CustomersPage.jsx';
 import SettingsPage from './components/SettingsPage.jsx';
@@ -47,6 +48,8 @@ export default function App() {
     setInstallServiceRates,
     pricingConfig,
     setPricingConfig,
+    fitments,
+    addFitment,
   } = useTireData();
 
   return (
@@ -79,6 +82,14 @@ export default function App() {
             onPreloadConsumed={() => setQuotePreload(null)}
             pricingConfig={pricingConfig}
             setPricingConfig={setPricingConfig}
+          />
+        )}
+        {activeTab === 'fitment' && (
+          <FitmentFinder
+            fitments={fitments}
+            onAddFitment={addFitment}
+            addTire={addTire}
+            tires={tires}
           />
         )}
         {activeTab === 'customers' && (

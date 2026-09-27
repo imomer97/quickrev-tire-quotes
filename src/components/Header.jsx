@@ -5,6 +5,7 @@ export default function Header({ activeTab, setActiveTab, syncAllWarehouses, syn
   const isB2B = !!(pricingConfig && pricingConfig.wholesale);
   const tabs = [
     { id: 'search', label: 'Search & Quote', short: 'Search' },
+    { id: 'fitment', label: 'Fitment Finder', short: 'Fitment' },
     { id: 'customers', label: 'Customers', short: 'Customers' },
     { id: 'settings', label: 'Settings', short: 'Settings' },
     { id: 'import', label: 'Import Data', short: 'Import' },

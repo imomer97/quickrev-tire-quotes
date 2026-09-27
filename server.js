@@ -121,7 +121,7 @@ function requireSyncKey(req, res, next) {
   next();
 }
 
-const EMPTY_SYNC = { manualTires: [], overrides: {}, deletedKeys: [], warehouseLocations: [], customDistributors: [], installServiceRates: {}, quoteHistory: [], customers: {} };
+const EMPTY_SYNC = { manualTires: [], overrides: {}, deletedKeys: [], warehouseLocations: [], customDistributors: [], installServiceRates: {}, quoteHistory: [], customers: {}, fitments: [] };
 
 // === QUOTE HISTORY ===
 // Every generated quote is saved (items, totals, options, customer) so past
@@ -421,6 +421,7 @@ app.put('/api/sync-data', requireSyncKey, async (req, res) => {
   const warehouseLocations = Array.isArray(body.warehouseLocations) ? body.warehouseLocations : [];
   const customDistributors = Array.isArray(body.customDistributors) ? body.customDistributors : [];
   const installServiceRates = body.installServiceRates && typeof body.installServiceRates === 'object' ? body.installServiceRates : null;
+  const fitments = Array.isArray(body.fitments) ? body.fitments : null;
   try {
     const prev = (await store.read()) || EMPTY_SYNC;
 
@@ -472,6 +473,9 @@ app.put('/api/sync-data', requireSyncKey, async (req, res) => {
       // sync push (which doesn't carry it) overwrite it.
       quoteHistory: (prev && Array.isArray(prev.quoteHistory)) ? prev.quoteHistory : [],
       customers: (prev && prev.customers && typeof prev.customers === 'object') ? prev.customers : {},
+      // Fitment DB is client-merged (union by vehicle+rim); server keeps the
+      // incoming list as-is, or preserves the previous one when absent.
+      fitments: fitments || ((prev && Array.isArray(prev.fitments)) ? prev.fitments : []),
     });
     res.json({ success: true, storage: store.kind });
   } catch (err) {
