@@ -1,15 +1,13 @@
 import { useMemo, useState } from 'react';
-import { Search, Plus, Check, Car, X } from 'lucide-react';
+import { Search, Plus, Check, Car, X, AlertTriangle, ShieldCheck, Layers } from 'lucide-react';
 
 /**
  * Fitment Finder — search by year / make / model / trim to get the stock SKU
  * for each possible rim size on that vehicle, set a wholesale rate on any
  * result, and add it as a new catalog item (skipped if already added).
  *
- * The fitment database lives in the cloud sync store (server-side), so it is
- * shared across devices like the rest of the catalog. `fitments` and
- * `onAddFitment` come from useTireData (synced via the warehouseLocations-style
- * list inside the shared store payload).
+ * Supports Exact-Fit vs. Multi-Application SKUs, and vehicle fitment notes
+ * (e.g. Brembo Brakes, Sport Packages, Track Handling Pkg).
  */
 
 function normalize(s) {
@@ -71,7 +69,7 @@ export default function FitmentFinder({ fitments = [], onAddFitment, addTire, ti
     });
   }, [fitments, year, make, model, trim]);
 
-  // Aggregate: one row per rim size with its SKU(s)
+  // Aggregate: one row per rim size with its SKU(s), Exact-Fit vs Multi-Fit, and Notes
   const rows = useMemo(() => {
     const byRim = new Map();
     for (const f of results) {
@@ -79,16 +77,41 @@ export default function FitmentFinder({ fitments = [], onAddFitment, addTire, ti
       if (!rim) continue;
       const key = String(rim);
       if (!byRim.has(key)) {
-        byRim.set(key, { rimSize: key, skus: new Set(), sources: new Set() });
+        byRim.set(key, {
+          rimSize: key,
+          skus: new Set(),
+          exactFitSkus: new Set(),
+          multiFitSkus: new Set(),
+          notes: new Set(),
+          sources: new Set()
+        });
       }
       const row = byRim.get(key);
-      if (f.sku) row.skus.add(f.sku);
+      if (f.sku) {
+        String(f.sku).split(',').map(s => s.trim()).filter(Boolean).forEach(s => row.skus.add(s));
+      }
+      if (f.exactFitSkus) {
+        String(f.exactFitSkus).split(',').map(s => s.trim()).filter(Boolean).forEach(s => row.exactFitSkus.add(s));
+      }
+      if (f.multiFitSkus) {
+        String(f.multiFitSkus).split(',').map(s => s.trim()).filter(Boolean).forEach(s => row.multiFitSkus.add(s));
+      }
+      if (f.notes) {
+        String(f.notes).split(';').map(n => n.trim()).filter(Boolean).forEach(n => row.notes.add(n));
+      }
       if (f.source) row.sources.add(f.source);
       if (f.boltPattern) row.boltPattern = f.boltPattern;
       if (f.offset) row.offset = f.offset;
       if (f.width) row.width = f.width;
     }
-    return [...byRim.values()].map(r => ({ ...r, skus: [...r.skus], sources: [...r.sources] })).sort((a, b) => parseInt(a.rimSize) - parseInt(b.rimSize));
+    return [...byRim.values()].map(r => ({
+      ...r,
+      skus: [...r.skus],
+      exactFitSkus: [...r.exactFitSkus],
+      multiFitSkus: [...r.multiFitSkus],
+      notes: [...r.notes],
+      sources: [...r.sources]
+    })).sort((a, b) => parseInt(a.rimSize) - parseInt(b.rimSize));
   }, [results]);
 
   const alreadyAdded = (sku, rimSize) => {
@@ -100,13 +123,19 @@ export default function FitmentFinder({ fitments = [], onAddFitment, addTire, ti
   };
 
   const handleAdd = (row) => {
-    const sku = row.skus[0] || `${normalize(make)}-${row.rimSize}`;
+    const sku = row.exactFitSkus[0] || row.multiFitSkus[0] || row.skus[0] || `${normalize(make)}-${row.rimSize}`;
     const ws = parseFloat(wholesaleBySku[row.rimSize]) || 0;
     const exists = alreadyAdded(sku, row.rimSize);
     if (exists) {
       setAddedSkus(a => ({ ...a, [row.rimSize]: 'exists' }));
       return;
     }
+
+    let notesText = `Fitment: ${year} ${make} ${model}${trim ? ` ${trim}` : ''} — rim ${row.rimSize}"`;
+    if (row.notes.length > 0) {
+      notesText += ` [${row.notes.join('; ')}]`;
+    }
+
     addTire({
       brand: make || 'OEM',
       model: `${year} ${make} ${model}${trim ? ` ${trim}` : ''}`.trim(),
@@ -117,7 +146,7 @@ export default function FitmentFinder({ fitments = [], onAddFitment, addTire, ti
       category: 'wheel',
       distributorId,
       sku,
-      notes: `Fitment: ${year} ${make} ${model}${trim ? ` ${trim}` : ''} — rim ${row.rimSize}"`,
+      notes: notesText,
       wholesaleOverride: ws,
     });
     setAddedSkus(a => ({ ...a, [row.rimSize]: 'added' }));
@@ -133,7 +162,7 @@ export default function FitmentFinder({ fitments = [], onAddFitment, addTire, ti
         <h2 className="text-xl font-bold text-primary">Fitment Finder</h2>
       </div>
       <p className="text-sm text-muted mb-4">
-        Search by vehicle to see every possible rim size and its SKU. Set a wholesale rate per result, then add it as a catalog item — items that already exist are skipped.
+        Search by vehicle to see every possible rim size, Exact-Fit and Multi-Application SKUs, and vehicle notes (such as Brembo Brakes). Set a wholesale rate per result, then add it as a catalog item — items that already exist are skipped.
       </p>
 
       {/* Search form */}
@@ -172,7 +201,7 @@ export default function FitmentFinder({ fitments = [], onAddFitment, addTire, ti
       {rows.length === 0 ? (
         <div className="card p-6 text-center text-muted">
           <Search className="w-8 h-8 mx-auto mb-2 opacity-40" />
-          <p>No fitment data matches. Add vehicles via Import or the cloud sync.</p>
+          <p>No fitment data matches. Select a vehicle above or add fitments manually.</p>
         </div>
       ) : (
         <div className="card overflow-x-auto">
@@ -181,34 +210,85 @@ export default function FitmentFinder({ fitments = [], onAddFitment, addTire, ti
               <tr className="text-left border-b border-slate-200 text-xs uppercase text-muted">
                 <th className="px-3 py-2">Rim Size</th>
                 <th className="px-3 py-2">Spec</th>
-                <th className="px-3 py-2">SKU</th>
+                <th className="px-3 py-2">Exact-Fit SKU</th>
+                <th className="px-3 py-2">Multi-App SKU</th>
+                <th className="px-3 py-2">Notes</th>
                 <th className="px-3 py-2 w-32">Wholesale</th>
                 <th className="px-3 py-2"></th>
               </tr>
             </thead>
             <tbody>
               {rows.map(row => {
+                const primarySku = row.exactFitSkus[0] || row.multiFitSkus[0] || row.skus[0];
                 const state = addedSkus[row.rimSize];
-                const exists = alreadyAdded(row.skus[0], row.rimSize);
+                const exists = alreadyAdded(primarySku, row.rimSize);
                 return (
-                  <tr key={row.rimSize} className="border-b border-slate-100 last:border-0">
-                    <td className="px-3 py-2 font-bold text-primary">{row.rimSize}"</td>
-                    <td className="px-3 py-2 text-muted">
+                  <tr key={row.rimSize} className="border-b border-slate-100 last:border-0 hover:bg-slate-50/50">
+                    <td className="px-3 py-2 font-bold text-primary whitespace-nowrap">{row.rimSize}"</td>
+                    <td className="px-3 py-2 text-muted whitespace-nowrap">
                       {row.width ? `${row.rimSize}×${row.width}` : ''}{row.offset != null ? ` ET${row.offset}` : ''}{row.boltPattern ? ` ${row.boltPattern}` : ''}
                     </td>
-                    <td className="px-3 py-2 font-mono text-xs">{row.skus.join(', ') || '—'}</td>
+                    <td className="px-3 py-2">
+                      {row.exactFitSkus.length > 0 ? (
+                        <div className="flex flex-wrap gap-1">
+                          {row.exactFitSkus.map(sku => (
+                            <span key={sku} className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-mono bg-emerald-50 text-emerald-700 border border-emerald-200" title="Exact-Fit SKU">
+                              <ShieldCheck className="w-3 h-3 text-emerald-600" />
+                              {sku}
+                            </span>
+                          ))}
+                        </div>
+                      ) : (
+                        <span className="text-slate-400 text-xs">—</span>
+                      )}
+                    </td>
+                    <td className="px-3 py-2">
+                      {row.multiFitSkus.length > 0 ? (
+                        <div className="flex flex-wrap gap-1">
+                          {row.multiFitSkus.map(sku => (
+                            <span key={sku} className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-mono bg-blue-50 text-blue-700 border border-blue-200" title="Multi-Application SKU">
+                              <Layers className="w-3 h-3 text-blue-500" />
+                              {sku}
+                            </span>
+                          ))}
+                        </div>
+                      ) : (
+                        <span className="text-slate-400 text-xs">—</span>
+                      )}
+                    </td>
+                    <td className="px-3 py-2">
+                      {row.notes.length > 0 ? (
+                        <div className="flex flex-wrap gap-1">
+                          {row.notes.map((note, idx) => (
+                            <span
+                              key={idx}
+                              className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium ${
+                                note.toLowerCase().includes('brembo') || note.toLowerCase().includes('brake')
+                                  ? 'bg-amber-100 text-amber-900 border border-amber-300'
+                                  : 'bg-slate-100 text-slate-800 border border-slate-200'
+                              }`}
+                            >
+                              <AlertTriangle className="w-3 h-3 flex-shrink-0 text-amber-600" />
+                              {note}
+                            </span>
+                          ))}
+                        </div>
+                      ) : (
+                        <span className="text-slate-400 text-xs">—</span>
+                      )}
+                    </td>
                     <td className="px-3 py-2">
                       <input
                         type="number"
                         step="0.01"
                         min="0"
-                        className="input w-28"
+                        className="input w-28 text-sm"
                         placeholder="$"
                         value={wholesaleBySku[row.rimSize] ?? ''}
                         onChange={e => setWholesaleBySku(w => ({ ...w, [row.rimSize]: e.target.value }))}
                       />
                     </td>
-                    <td className="px-3 py-2 text-right">
+                    <td className="px-3 py-2 text-right whitespace-nowrap">
                       <button
                         className="btn btn-sm text-white bg-green-600 hover:bg-green-700 inline-flex items-center gap-1"
                         onClick={() => handleAdd(row)}
@@ -228,7 +308,7 @@ export default function FitmentFinder({ fitments = [], onAddFitment, addTire, ti
         </div>
       )}
 
-      {/* Manual fitment entry — so the DB can grow without a CSV */}
+      {/* Manual fitment entry */}
       <ManualFitmentForm onAddFitment={onAddFitment} years={years} />
     </div>
   );
@@ -236,7 +316,7 @@ export default function FitmentFinder({ fitments = [], onAddFitment, addTire, ti
 
 function ManualFitmentForm({ onAddFitment, years }) {
   const [open, setOpen] = useState(false);
-  const [form, setForm] = useState({ year: '', make: '', model: '', trim: '', rimSize: '', width: '', offset: '', boltPattern: '', sku: '' });
+  const [form, setForm] = useState({ year: '', make: '', model: '', trim: '', rimSize: '', width: '', offset: '', boltPattern: '', exactFitSkus: '', multiFitSkus: '', notes: '' });
   const label = 'text-sm font-medium mb-1 block text-primary';
   const inputCls = 'input w-full';
   const set = (k) => (e) => setForm(f => ({ ...f, [k]: e.target.value }));
@@ -244,13 +324,14 @@ function ManualFitmentForm({ onAddFitment, years }) {
   const submit = (e) => {
     e.preventDefault();
     if (!form.year || !form.make || !form.model || !form.rimSize) return;
-    onAddFitment({ ...form, year: parseInt(form.year, 10) });
-    setForm(f => ({ ...f, rimSize: '', width: '', offset: '', boltPattern: '', sku: '' }));
+    const allSkus = [form.exactFitSkus, form.multiFitSkus].filter(Boolean).join(',');
+    onAddFitment({ ...form, sku: allSkus, year: parseInt(form.year, 10) });
+    setForm(f => ({ ...f, rimSize: '', width: '', offset: '', boltPattern: '', exactFitSkus: '', multiFitSkus: '', notes: '' }));
   };
 
   if (!open) {
     return (
-      <button className="btn btn-sm mt-4" onClick={() => setOpen(true)}>
+      <button className="btn btn-sm mt-4 inline-flex items-center gap-1" onClick={() => setOpen(true)}>
         <Plus className="w-4 h-4" /> Add fitment manually
       </button>
     );
@@ -269,7 +350,9 @@ function ManualFitmentForm({ onAddFitment, years }) {
       <div><label className={label}>Width</label><input className={inputCls} value={form.width} onChange={set('width')} placeholder="7" /></div>
       <div><label className={label}>Offset</label><input className={inputCls} value={form.offset} onChange={set('offset')} placeholder="45" /></div>
       <div><label className={label}>Bolt pattern</label><input className={inputCls} value={form.boltPattern} onChange={set('boltPattern')} placeholder="5x114.3" /></div>
-      <div><label className={label}>SKU</label><input className={inputCls} value={form.sku} onChange={set('sku')} placeholder="OEM SKU" /></div>
+      <div><label className={label}>Exact-Fit SKU</label><input className={inputCls} value={form.exactFitSkus} onChange={set('exactFitSkus')} placeholder="STX..." /></div>
+      <div><label className={label}>Multi-App SKU</label><input className={inputCls} value={form.multiFitSkus} onChange={set('multiFitSkus')} placeholder="STX..." /></div>
+      <div className="col-span-2"><label className={label}>Notes</label><input className={inputCls} value={form.notes} onChange={set('notes')} placeholder="e.g. Except Brembo Brakes" /></div>
       <div className="col-span-2 md:col-span-4">
         <button type="submit" className="btn btn-sm text-white bg-green-600 hover:bg-green-700">Save fitment</button>
       </div>
