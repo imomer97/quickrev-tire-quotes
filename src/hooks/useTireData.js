@@ -735,10 +735,13 @@ export function useTireData() {
         ...locationsRef.current,
         ...(Array.isArray(data.warehouseLocations) ? data.warehouseLocations : []),
       ])].sort();
-      // Fitments: merge by year+make+model+trim+rim so duplicates never pile up.
+      // Fitments: server is authoritative; local entries fallback only if not in server.
       const fitKey = (f) => [f.year, f.make, f.model, f.trim, f.rimSize].map(x => String(x || '').toLowerCase()).join('|');
       const fitMap = new Map();
-      for (const f of [...(Array.isArray(data.fitments) ? data.fitments : []), ...fitmentsRef.current]) {
+      for (const f of fitmentsRef.current) {
+        if (f && f.make && f.rimSize) fitMap.set(fitKey(f), f);
+      }
+      for (const f of (Array.isArray(data.fitments) ? data.fitments : [])) {
         if (f && f.make && f.rimSize) fitMap.set(fitKey(f), f);
       }
       const mergedFitments = [...fitMap.values()];

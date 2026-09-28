@@ -63,7 +63,10 @@ export default function FitmentFinder({ fitments = [], onAddFitment, addTire, ti
     return fitments.filter(f => {
       if (y && normalize(f.year) !== y) return false;
       if (ma && normalize(f.make) !== ma) return false;
-      if (mo && !(normalize(f.model) || '').includes(mo)) return false;
+      if (mo) {
+        const normFitModel = normalize(f.model);
+        if (!normFitModel.includes(mo) && !mo.includes(normFitModel)) return false;
+      }
       if (t && !(normalize(f.trim) || '').includes(t)) return false;
       return true;
     });
@@ -169,14 +172,34 @@ export default function FitmentFinder({ fitments = [], onAddFitment, addTire, ti
       <div className="card p-4 mb-5 grid grid-cols-2 md:grid-cols-4 gap-3">
         <div>
           <label className={label}>Year</label>
-          <select className={inputCls} value={year} onChange={e => { setYear(e.target.value); setMake(''); setModel(''); setTrim(''); }}>
+          <select className={inputCls} value={year} onChange={e => {
+            const nextYear = e.target.value;
+            setYear(nextYear);
+            if (nextYear && make) {
+              const hasMake = fitments.some(f => String(f.year) === nextYear && f.make === make);
+              if (!hasMake) { setMake(''); setModel(''); setTrim(''); }
+              else if (model) {
+                const hasModel = fitments.some(f => String(f.year) === nextYear && f.make === make && f.model === model);
+                if (!hasModel) { setModel(''); setTrim(''); }
+              }
+            }
+          }}>
             <option value="">Any</option>
             {years.map(y => <option key={y} value={y}>{y}</option>)}
           </select>
         </div>
         <div>
           <label className={label}>Make</label>
-          <select className={inputCls} value={make} onChange={e => { setMake(e.target.value); setModel(''); setTrim(''); }}>
+          <select className={inputCls} value={make} onChange={e => {
+            const nextMake = e.target.value;
+            setMake(nextMake);
+            if (nextMake && model) {
+              const hasModel = fitments.some(f => (!year || String(f.year) === year) && f.make === nextMake && f.model === model);
+              if (!hasModel) { setModel(''); setTrim(''); }
+            } else if (!nextMake) {
+              setModel(''); setTrim('');
+            }
+          }}>
             <option value="">Any</option>
             {makes.map(m => <option key={m} value={m}>{m}</option>)}
           </select>
@@ -222,6 +245,7 @@ export default function FitmentFinder({ fitments = [], onAddFitment, addTire, ti
                 const primarySku = row.exactFitSkus[0] || row.multiFitSkus[0] || row.skus[0];
                 const state = addedSkus[row.rimSize];
                 const exists = alreadyAdded(primarySku, row.rimSize);
+                const unassignedSkus = row.skus.filter(s => !row.exactFitSkus.includes(s) && !row.multiFitSkus.includes(s));
                 return (
                   <tr key={row.rimSize} className="border-b border-slate-100 last:border-0 hover:bg-slate-50/50">
                     <td className="px-3 py-2 font-bold text-primary whitespace-nowrap">{row.rimSize}"</td>
@@ -234,6 +258,14 @@ export default function FitmentFinder({ fitments = [], onAddFitment, addTire, ti
                           {row.exactFitSkus.map(sku => (
                             <span key={sku} className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-mono bg-emerald-50 text-emerald-700 border border-emerald-200" title="Exact-Fit SKU">
                               <ShieldCheck className="w-3 h-3 text-emerald-600" />
+                              {sku}
+                            </span>
+                          ))}
+                        </div>
+                      ) : unassignedSkus.length > 0 && row.multiFitSkus.length === 0 ? (
+                        <div className="flex flex-wrap gap-1">
+                          {unassignedSkus.map(sku => (
+                            <span key={sku} className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-mono bg-slate-100 text-slate-700 border border-slate-300" title="Standard SKU">
                               {sku}
                             </span>
                           ))}
