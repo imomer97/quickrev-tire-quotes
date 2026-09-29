@@ -22,6 +22,14 @@ function shortDate(d) {
 }
 
 /**
+ * Parse a tire size or, failing that, a wheel/rim size (used for install
+ * eligibility and per-item install fee lookup).
+ */
+function parseInstallSize(tire) {
+  return parseTireSize(tire && tire.size) || parseWheelSize(tire && tire.size);
+}
+
+/**
  * Generate a PDF showing available tire options and estimated costs
  * FIXED: Installation now included in HST calculation
  * FIXED: Sale-aware prices — when a tire is on sale (between saleStart and
@@ -110,7 +118,7 @@ export function generateOptionsPDF({
 
   // Item size + installation count — only shown when relevant.
   const anyInstallRow = tires.some(
-    t => includeInstallation && t.includeInstall !== false && (t.category || 'tire') === 'tire' && parseTireSize(t.size)
+    t => includeInstallation && t.includeInstall !== false && (isTpmsItem(t) || !!parseInstallSize(t))
   );
   if (tireSize) {
     doc.setFontSize(10);
@@ -170,9 +178,7 @@ export function generateOptionsPDF({
   const anySale = tires.some(t => typeof t.salePrice === 'number' && t.salePrice > 0);
   const showPeriod = anySale;
   const anyInstall = tires.some(t =>
-    includeInstallation && t.includeInstall !== false && (
-      isTpmsItem(t) || ((t.category || 'tire') === 'tire' && parseTireSize(t.size))
-    )
+    includeInstallation && t.includeInstall !== false && (isTpmsItem(t) || !!parseInstallSize(t))
   );
   const showInstallCol = includeInstallation && anyInstall;
 
@@ -180,7 +186,10 @@ export function generateOptionsPDF({
   const CAT_LABEL = { tire: 'Tire', wheel: 'Wheel', part: 'Part', service: 'Service' };
 
   const rowMeta = tires.map(tire => {
-    const parsed = parseTireSize(tire.size);
+    // A tire size or a wheel size both make an item installable — this mirrors
+    // the item cards (getTireCalculations), so a wheel/rim with "Include
+    // installation" checked shows its install fee on the PDF too.
+    const parsed = parseInstallSize(tire);
     // Installation-service line items are priced as one job (their `price` is
     // the full install total), so they never multiply by the quote quantity.
     // Other lines honor their per-item quantity when provided.
@@ -196,7 +205,7 @@ export function generateOptionsPDF({
     // carry a flat per-sensor programming fee instead of the size-based rate.
     const tpms = isTpmsItem(tire);
     const installEligible = includeInstallation && tire.includeInstall !== false && (
-      tpms || (parsed && (tire.category || 'tire') === 'tire')
+      tpms || !!parsed
     );
     let installPerTire = 0;
     let totalHST;
