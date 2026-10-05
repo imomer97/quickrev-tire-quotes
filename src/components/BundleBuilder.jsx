@@ -21,12 +21,17 @@ function normSize(tire) {
   return p ? `${p.width}/${p.aspect}R${p.rim}` : String((tire && tire.size) || '').trim().toUpperCase();
 }
 
-export default function BundleBuilder({ tires = [], fitments = [], pricingConfig, setPricingConfig, onAddBundles }) {
+export default function BundleBuilder({ tires = [], fitments = [], pricingConfig, setPricingConfig, onAddBundles, warehouseLocations = [], distributors = [] }) {
   const [sizeInput, setSizeInput] = useState('');
   const [selectedSku, setSelectedSku] = useState('');
   const [category, setCategory] = useState('tire');
   const [rateDraft, setRateDraft] = useState(null); // null = use the Settings value
   const [addedMsg, setAddedMsg] = useState(null); // confirmation after adding to the quote
+  // === CATALOG FILTERS ===
+  const [distributorFilter, setDistributorFilter] = useState(''); // '' = all distributors
+  const [warehouse, setWarehouse] = useState(''); // '' = all warehouses (stock sums)
+  const [inStockOnly, setInStockOnly] = useState(false);
+  const [minStock, setMinStock] = useState(4);
 
   const parsed = parseTireSize(sizeInput);
   const diameter = parsed ? parsed.rim : null;
@@ -77,16 +82,33 @@ export default function BundleBuilder({ tires = [], fitments = [], pricingConfig
       .sort((a, b) => a.sku.localeCompare(b.sku));
   }, [fitments, diameter]);
 
+  // Stock for the current warehouse selection: a specific warehouse reads the
+  // per-location inventory; "all warehouses" falls back to the summed stock.
+  const stockOf = (tire) => {
+    if (warehouse) {
+      return ((tire.inventory || []).find(l => l.location === warehouse) || {}).quantity ?? 0;
+    }
+    return tire.stock || 0;
+  };
+
   // Tire options from the catalog that match the entered size exactly
-  // (normalized), optionally filtered by category (tire/wheel/part).
+  // (normalized), filtered by category, distributor, and availability.
   const tireOptions = useMemo(() => {
     if (!normInput) return [];
     return tires
       .filter(t => t && normSize(t) === normInput)
       .filter(t => !category || (t.category || 'tire') === category)
+      .filter(t => !distributorFilter || t.distributorId === distributorFilter)
+      .filter(t => !inStockOnly || stockOf(t) >= minStock)
       .map(t => ({ tire: t, retail: getEffectiveRetail(t) || 0 }))
       .sort((a, b) => a.retail - b.retail);
-  }, [tires, normInput, category]);
+  }, [tires, normInput, category, distributorFilter, inStockOnly, minStock, warehouse]);
+
+  const totalMatches = useMemo(() => (
+    normInput
+      ? tires.filter(t => t && normSize(t) === normInput).filter(t => !category || (t.category || 'tire') === category).length
+      : 0
+  ), [tires, normInput, category]);
 
   const selectedRim = rimOptions.find(r => r.sku === selectedSku) || null;
 
@@ -211,6 +233,42 @@ export default function BundleBuilder({ tires = [], fitments = [], pricingConfig
         </div>
       </div>
 
+      {/* Step 2: catalog filters (distributor, warehouse, availability) */}
+      <div className="card p-4 mb-5 grid grid-cols-1 md:grid-cols-4 gap-3">
+        <div>
+          <label className={label}>Distributor</label>
+          <select className={inputCls} value={distributorFilter} onChange={e => setDistributorFilter(e.target.value)}>
+            <option value="">All distributors</option>
+            {distributors.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
+          </select>
+        </div>
+        <div>
+          <label className={label}>Warehouse</label>
+          <select className={inputCls} value={warehouse} onChange={e => setWarehouse(e.target.value)}>
+            <option value="">All warehouses (summed stock)</option>
+            {warehouseLocations.map(loc => <option key={loc} value={loc}>{loc}</option>)}
+          </select>
+        </div>
+        <div>
+          <label className={label}>Availability</label>
+          <label className="flex items-center gap-2 cursor-pointer mt-1">
+            <input type="checkbox" checked={inStockOnly} onChange={e => setInStockOnly(e.target.checked)} className="rounded" />
+            <span className="text-sm">In stock only</span>
+          </label>
+        </div>
+        <div>
+          <label className={label}>Min. stock (for quote)</label>
+          <input
+            type="number"
+            min="0"
+            max="20"
+            className={inputCls}
+            value={minStock}
+            onChange={e => setMinStock(Math.max(0, parseInt(e.target.value) || 0))}
+          />
+        </div>
+      </div>
+
       {/* Bundle rows */}
       {!normInput ? (
         <div className="card p-6 text-center text-muted">
@@ -220,13 +278,22 @@ export default function BundleBuilder({ tires = [], fitments = [], pricingConfig
       ) : tireOptions.length === 0 ? (
         <div className="card p-6 text-center text-muted">
           <Search className="w-8 h-8 mx-auto mb-2 opacity-40" />
-          <p>No catalog items found for {normInput}. Sync the catalog (Import Data → Sync) or check the size.</p>
+          <p>
+            {totalMatches > 0
+              ? `All ${totalMatches} catalog item(s) for ${normInput} are hidden by the current filters — relax the distributor, warehouse, or availability filters above.`
+              : `No catalog items found for ${normInput}. Sync the catalog (Import Data → Sync) or check the size.`}
+          </p>
         </div>
       ) : (
         <>
         {addedMsg && <p className="text-success text-sm mb-2 font-medium">✓ {addedMsg}</p>}
         <div className="flex items-center justify-between mb-2">
-          <span className="text-sm text-muted">{tireOptions.length} option(s) for {normInput}</span>
+          <span className="text-sm text-muted">
+            {tireOptions.length === totalMatches
+              ? `${tireOptions.length} option(s) for ${normInput}`
+              : `${tireOptions.length} of ${totalMatches} option(s) for ${normInput} (filtered)`}
+            {warehouse ? ` · ${warehouse}` : ''}
+          </span>
           <button className="btn btn-sm btn-primary" onClick={addAll} disabled={!onAddBundles}>
             <ShoppingCart className="w-4 h-4" />
             Add all to quote
@@ -262,7 +329,15 @@ export default function BundleBuilder({ tires = [], fitments = [], pricingConfig
                     <td className="px-3 py-2 text-right">{formatCurrency(setPrice(retail))}</td>
                     <td className="px-3 py-2 text-right">{formatCurrency(installRate)}</td>
                     <td className="px-3 py-2 text-right font-bold">{formatCurrency(setPrice(retail) + installRate)}</td>
-                    <td className="px-3 py-2">{tire.stock ?? 0}</td>
+                    <td className="px-3 py-2">
+                      {(() => {
+                        // Color-coded, warehouse-aware stock: green healthy,
+                        // amber moderate, orange low, red out.
+                        const s = stockOf(tire);
+                        const color = s === 0 ? '#dc2626' : s < 4 ? '#ea580c' : s <= 10 ? '#ca8a04' : '#16a34a';
+                        return <span className="font-bold" style={{ color }}>{s}</span>;
+                      })()}
+                    </td>
                     <td className="px-3 py-2">
                       <button className="btn btn-sm btn-primary whitespace-nowrap" onClick={() => addOne({ tire, retail })} disabled={!onAddBundles} title="Add this bundle as one line item on the quote">
                         <ShoppingCart className="w-3.5 h-3.5" />

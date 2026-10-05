@@ -110,6 +110,8 @@ export default function App() {
             pricingConfig={pricingConfig}
             setPricingConfig={setPricingConfig}
             onAddBundles={addBundlesToQuote}
+            warehouseLocations={warehouseLocations}
+            distributors={distributors}
           />
         )}
         {activeTab === 'customers' && (
