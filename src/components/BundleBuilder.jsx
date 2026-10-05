@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { Package, Search, ShoppingCart, CheckSquare, Square } from 'lucide-react';
 import {
   parseTireSize,
+  parseWheelSize,
   formatCurrency,
   getEffectiveRetail,
 } from '../data/distributors.js';
@@ -34,6 +35,12 @@ export default function BundleBuilder({ tires = [], fitments = [], pricingConfig
   const [minStock, setMinStock] = useState(4);
   // Season filter (multi-select, matches the catalog's season values)
   const [activeSeasons, setActiveSeasons] = useState(new Set());
+  // Rim price per wheel — a bundle is 4 tires + 4 rims, so the rim cost ×4
+  // is part of the bundle price. Maintained here, stored on the item.
+  const [rimUnit, setRimUnit] = useState('');
+  // When on, adding bundles also adds one $X/set installation line. The
+  // 10% QuickRev discount is internal and never mentioned on the PDF.
+  const [includeInstallation, setIncludeInstallation] = useState(true);
   // Multi-select: bundle rows the user ticked for a mixed quote
   const [selectedIds, setSelectedIds] = useState(new Set());
 
@@ -126,62 +133,118 @@ export default function BundleBuilder({ tires = [], fitments = [], pricingConfig
 
   const selectedRim = rimOptions.find(r => r.sku === selectedSku) || null;
 
-  // Price per set of 4 tires (retail) — install rate is added on top per set.
-  const setPrice = (retail) => retail * 4;
+  const rimUnitNum = Math.max(0, parseFloat(rimUnit) || 0);
 
-  // Build a ready-made quote line item for a bundle: tires × 4 plus the
-  // installation rate in a single price (category 'service' prices itself
-  // directly and skips install math on the PDF). The bundle parts are stored
-  // on the item so the quote panel can edit them later (price recomputes).
+  // Rim specs from the catalog: find the wheel item whose SKU/model matches
+  // the selected rim SKU and pull diameter×width, bolt pattern, and centre
+  // bore (CB) from its size string (e.g. "18X8 5-112 72.6").
+  const rimSpec = useMemo(() => {
+    if (!selectedSku) return '';
+    const wheel = tires.find(t => t && t.category === 'wheel' && (
+      String(t.sku || '').toUpperCase() === selectedSku.toUpperCase()
+      || String(t.model || '').toUpperCase().includes(selectedSku.toUpperCase())
+    ));
+    if (!wheel) return '';
+    const s = String(wheel.size || '');
+    const w = parseWheelSize(s);
+    const parts = [];
+    if (w && w.diameter != null) {
+      parts.push(w.width != null ? `${w.diameter}x${w.width}` : `${w.diameter}`);
+    }
+    if (w && w.boltPattern) parts.push(String(w.boltPattern).toUpperCase());
+    // Centre bore: the standalone decimal number in the size string (e.g. 72.6)
+    const cb = s.match(/\b(\d{2}\.\d+)\b/);
+    if (cb) parts.push(`CB${cb[1]}`);
+    return parts.join(' · ');
+  }, [tires, selectedSku]);
+
+  // Build a ready-made quote line item for a bundle: 4 tires + 4 rims at a
+  // per-bundle price (Qty 1 on the PDF). Installation is a separate line.
   const buildBundleItem = ({ tire, retail }) => {
     const brandModel = [tire.brand, tire.model].filter(Boolean).join(' ').trim();
     const rimSku = selectedRim ? selectedRim.sku : '';
     const bolt = selectedRim && selectedRim.boltPattern ? selectedRim.boltPattern : '';
+    // A bundle = 4 tires + 4 rims. Its price is PER BUNDLE (Qty 1 on the PDF):
+    // (tire × 4) + (rim × 4). Installation is a SEPARATE $50/set line added
+    // when the user has Include Installation on.
+    const bundlePrice = +(retail * 4 + rimUnitNum * 4).toFixed(2);
     return {
       id: `bundle-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       category: 'service',
       brand: 'QuickRev',
       // Nice PDF label, e.g. "STX81257H × 225/50R18 OVATION WV-688 Bundle"
       model: `${rimSku ? `${rimSku} × ` : ''}${normInput}${brandModel ? ` ${brandModel}` : ''} Bundle`,
-      // Size column on the PDF keeps only the product specs; qty lives in the
-      // Qty column (bundleQty) and the install rate is a global pricing note.
-      size: `${normInput}${bolt ? ` · ${bolt}` : ''}`,
-      price: +(setPrice(retail) + installRate).toFixed(2),
+      // Size column: tire size + rim spec (e.g. 18x8 · 5X112 · CB72.6).
+      size: [normInput, rimSpec || (bolt || null)].filter(Boolean).join(' · '),
+      price: bundlePrice,
       // Season pulls from the source tire (e.g. Winter) so the PDF shows it.
       season: tire.season || 'None',
       tier: 'service',
       stock: 1,
       includeInstall: false,
       isService: true,
+      // One bundle per row — the PDF Qty column shows 1.
+      bundleQty: 1,
       // Editable bundle fields (used by the quote line-item editor)
       isBundle: true,
       rimSku,
       tireSize: normInput,
       tireName: brandModel,
       tireUnit: +retail.toFixed(2),
+      rimUnit: +rimUnitNum.toFixed(2),
       installRate: +installRate.toFixed(2),
-      // The bundle covers a set of 4 — shown in the PDF's Qty column.
-      bundleQty: 4,
       quoteQty: 1,
       _transient: true,
     };
   };
 
+  // Installation line for bundles: one $X/set fee per job, added alongside
+  // the bundle lines when Include Installation is enabled. The 10% discount
+  // note is internal — never shown on the customer PDF.
+  const buildBundleInstallItem = (count) => ({
+    id: `bundle-install-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    category: 'service',
+    brand: 'QuickRev',
+    model: 'Installation',
+    size: `${normInput} · ${count} set${count === 1 ? '' : 's'}`,
+    price: +(installRate * count).toFixed(2),
+    season: 'None',
+    tier: 'service',
+    stock: 1,
+    includeInstall: false,
+    isService: true,
+    isBundleInstall: true,
+    bundleInstallRate: +installRate.toFixed(2),
+    serviceDesc: 'bundle installation',
+    servicePerUnit: +installRate.toFixed(2),
+    serviceUnit: 'set',
+    serviceQty: count,
+    quoteQty: 1,
+    _transient: true,
+  });
+
   const flashAdded = (n) => {
-    setAddedMsg(`Added ${n} bundle${n === 1 ? '' : 's'} to the quote — open Search & Quote to generate the PDF.`);
+    const inst = includeInstallation ? ` plus one ${formatCurrency(installRate)}/set installation line` : '';
+    setAddedMsg(`Added ${n} bundle${n === 1 ? '' : 's'} to the quote${inst} — open Search & Quote to generate the PDF.`);
     setTimeout(() => setAddedMsg(null), 4000);
   };
 
+  const pushBundles = (items) => {
+    if (!onAddBundles || items.length === 0) return;
+    const all = [...items];
+    // One installation line ($X/set × number of bundles) when installs are on.
+    if (includeInstallation) all.push(buildBundleInstallItem(items.length));
+    onAddBundles(all);
+    flashAdded(items.length);
+  };
+
   const addOne = (entry) => {
-    if (!onAddBundles) return;
-    onAddBundles([buildBundleItem(entry)]);
-    flashAdded(1);
+    pushBundles([buildBundleItem(entry)]);
   };
 
   const addAll = () => {
     if (!onAddBundles || tireOptions.length === 0) return;
-    onAddBundles(tireOptions.map(buildBundleItem));
-    flashAdded(tireOptions.length);
+    pushBundles(tireOptions.map(buildBundleItem));
   };
 
   // === MULTI-SELECT ===
@@ -200,8 +263,7 @@ export default function BundleBuilder({ tires = [], fitments = [], pricingConfig
   const addSelected = () => {
     if (!onAddBundles || selectedIds.size === 0) return;
     const picks = tireOptions.filter(o => selectedIds.has(o.tire.id));
-    onAddBundles(picks.map(buildBundleItem));
-    flashAdded(picks.length);
+    pushBundles(picks.map(buildBundleItem));
     setSelectedIds(new Set());
   };
 
@@ -221,7 +283,7 @@ export default function BundleBuilder({ tires = [], fitments = [], pricingConfig
       </p>
 
       {/* Step 1: size + rim picker */}
-      <div className="card p-4 mb-5 grid grid-cols-1 md:grid-cols-4 gap-3">
+      <div className="card p-4 mb-5 grid grid-cols-1 md:grid-cols-5 gap-3">
         <div>
           <label className={label}>Tire size</label>
           <input
@@ -258,7 +320,7 @@ export default function BundleBuilder({ tires = [], fitments = [], pricingConfig
           </select>
         </div>
         <div>
-          <label className={label}>Install rate ($ / set of 4)</label>
+          <label className={label}>Install rate ($ / set)</label>
           <div className="flex items-center gap-2">
             <input
               type="number"
@@ -269,7 +331,33 @@ export default function BundleBuilder({ tires = [], fitments = [], pricingConfig
               onChange={e => { setRateDraft(e.target.value); setInstallRate(e.target.value); }}
             />
           </div>
-          <p className="text-xs text-muted mt-1">Saved in Settings (bundle install rate).</p>
+          <p className="text-xs text-muted mt-1">Added as its own line when Include Installation is on (Search & Quote).</p>
+        </div>
+        <div>
+          <label className={label}>Rim price ($ / wheel)</label>
+          <input
+            type="number"
+            step="0.01"
+            min="0"
+            className={inputCls}
+            placeholder="e.g. 99.00"
+            value={rimUnit}
+            onChange={e => setRimUnit(e.target.value)}
+          />
+          <p className="text-xs text-muted mt-1">
+            Bundle price = 4 tires + 4 rims{rimUnitNum > 0 ? ` (+${formatCurrency(rimUnitNum * 4)}/bundle for rims)` : ' — enter the rim cost'}.
+          </p>
+        </div>
+        <div className="md:col-span-5">
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={includeInstallation}
+              onChange={e => setIncludeInstallation(e.target.checked)}
+              className="rounded"
+            />
+            <span className="text-sm font-medium">Include installation ({formatCurrency(installRate)}/set — added as its own quote line)</span>
+          </label>
         </div>
       </div>
 
@@ -308,7 +396,7 @@ export default function BundleBuilder({ tires = [], fitments = [], pricingConfig
           />
         </div>
         {seasonOptions.length > 0 && (
-          <div className="md:col-span-4">
+          <div className="md:col-span-5">
             <label className={label}>Season</label>
             <div className="flex flex-wrap gap-2">
               {seasonOptions.map(s => {
@@ -400,10 +488,9 @@ export default function BundleBuilder({ tires = [], fitments = [], pricingConfig
                 <th className="px-3 py-2">Bundle</th>
                 <th className="px-3 py-2">Brand / Model</th>
                 <th className="px-3 py-2">Size</th>
-                <th className="px-3 py-2 text-right">Tire (ea)</th>
-                <th className="px-3 py-2 text-right">Tires × 4</th>
-                <th className="px-3 py-2 text-right">Install / set</th>
-                <th className="px-3 py-2 text-right">Bundle total</th>
+                <th className="px-3 py-2 text-right">Tires (ea)</th>
+                <th className="px-3 py-2 text-right">Rims (ea)</th>
+                <th className="px-3 py-2 text-right">Price / bundle</th>
                 <th className="px-3 py-2">Stock</th>
                 <th className="px-3 py-2"></th>
               </tr>
@@ -428,12 +515,11 @@ export default function BundleBuilder({ tires = [], fitments = [], pricingConfig
                     <td className="px-3 py-2">{[tire.brand, tire.model].filter(Boolean).join(' ') || '—'}</td>
                     <td className="px-3 py-2 whitespace-nowrap">
                       {tire.size}
-                      {selectedRim && selectedRim.boltPattern ? <span className="text-muted text-xs"> · {selectedRim.boltPattern}</span> : null}
+                      {rimSpec ? <span className="text-muted text-xs"> · {rimSpec}</span> : (selectedRim && selectedRim.boltPattern ? <span className="text-muted text-xs"> · {selectedRim.boltPattern}</span> : null)}
                     </td>
                     <td className="px-3 py-2 text-right">{formatCurrency(retail)}</td>
-                    <td className="px-3 py-2 text-right">{formatCurrency(setPrice(retail))}</td>
-                    <td className="px-3 py-2 text-right">{formatCurrency(installRate)}</td>
-                    <td className="px-3 py-2 text-right font-bold">{formatCurrency(setPrice(retail) + installRate)}</td>
+                    <td className="px-3 py-2 text-right">{formatCurrency(rimUnitNum)}</td>
+                    <td className="px-3 py-2 text-right font-bold">{formatCurrency(retail * 4 + rimUnitNum * 4)}</td>
                     <td className="px-3 py-2">
                       {(() => {
                         // Color-coded, warehouse-aware stock: green healthy,

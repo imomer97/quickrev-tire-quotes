@@ -143,9 +143,9 @@ export function generateOptionsPDF({
   doc.setFont('helvetica', 'normal');
   // Total pieces quoted — the sum of each line's Qty column
   const totalPieces = tires.reduce((sum, t) => {
-    // Bundles cover a set of tires — count the set (bundleQty) so the header
-    // reflects real coverage, not the 1 line item.
-    if (t.isBundle) return sum + (t.bundleQty || 4);
+    // Bundles are 1 bundle per row (each = 4 tires + 4 rims); the install
+    // line is a service, not a piece.
+    if (t.isBundle) return sum + 1;
     return sum + (t.isService ? 0 : (quantityFor ? quantityFor(t) : quantity));
   }, 0);
   doc.text(`${totalPieces} item${totalPieces === 1 ? '' : 's'}`, margin + 30, y);
@@ -199,7 +199,7 @@ export function generateOptionsPDF({
     // the full install total), so they never multiply by the quote quantity.
     // Other lines honor their per-item quantity when provided.
     const itemQty = tire.isService
-      ? (tire.bundleQty || 1)  // bundles show their set size (4) in Qty
+      ? (tire.bundleQty || 1)  // bundles are 1 bundle per row (price already covers 4+4)
       : (quantityFor ? quantityFor(tire) : quantity);
 
     // Sale-aware pricing (matches the item cards). Free items price at $0.
@@ -211,7 +211,9 @@ export function generateOptionsPDF({
     // or explicit opt-out) are excluded. TPMS sensors are the exception: they
     // carry a flat per-sensor programming fee instead of the size-based rate.
     const tpms = isTpmsItem(tire);
-    const installEligible = includeInstallation && tire.includeInstall !== false && (
+    // Bundles never take the install-column math: their price is the full
+    // 4-tires + 4-rims bundle, and installation rides on its own line.
+    const installEligible = !tire.isBundle && includeInstallation && tire.includeInstall !== false && (
       tpms || !!parsed
     );
     let installPerTire = 0;
@@ -457,27 +459,28 @@ export function generateOptionsPDF({
     const notes = [];
 
     // Installation-service line items (customer-supplied tires)
-    tires.filter(t => t.isService && !t.isBundle).forEach(t => {
+    tires.filter(t => t.isService && !t.isBundle && !t.isBundleInstall).forEach(t => {
       notes.push(`• ${t.brand} ${t.model}: ${t.serviceDesc || 'installation'} — ${formatCurrency(t.servicePerUnit || 0)} per ${t.serviceUnit || 'tire'} × ${t.serviceQty || 1} ${t.serviceUnit || 'tire'}${(t.serviceQty || 1) === 1 ? '' : 's'}, quoted as one job`);
     });
 
-    // Bundles: ONE global note instead of a repeated bullet per option —
-    // every bundle in the quote carries the same install rate.
+    // Bundles: each row IS one bundle (4 tires + 4 rims, Qty 1). When an
+    // installation line is present, one global note covers all options.
+    // Internal-only details (e.g. the 10% discount) are never printed here.
     const bundleItems = tires.filter(t => t.isBundle);
+    const bundleInstallLine = tires.find(t => t.isBundleInstall);
     if (bundleItems.length > 0) {
-      const rates = [...new Set(bundleItems.map(t => formatCurrency(t.installRate || 0)))];
-      notes.push(`• All ${bundleItems.length} bundle option${bundleItems.length === 1 ? '' : 's'} include a ${rates.join(' / ')}/set installation fee, quoted as a single job (off-rims mounting, balancing, valve stems)`);
+      if (bundleInstallLine) {
+        notes.push(`• All ${bundleItems.length} bundle option${bundleItems.length === 1 ? '' : 's'} include a ${formatCurrency(bundleInstallLine.bundleInstallRate || bundleInstallLine.servicePerUnit || 0)}/set installation fee, quoted as a single job (off-rims mounting, balancing, valve stems)`);
+      } else {
+        notes.push(`• Bundle prices cover 4 tires + 4 rims per bundle — installation not included`);
+      }
     }
 
-    // Only add installation notes if installation is included
-    if (includeInstallation) {
+    // Only add installation notes if installation is included. The 10%
+    // QuickRev discount is an internal detail — never shown to the customer.
+    if (includeInstallation && !bundleInstallLine && !bundleItems.length) {
       notes.push(`• Installation includes off-rims mounting, balancing, and valve stems`);
-      if (buyFromQuickRev) {
-        notes.push(`• 10% installation discount applied when purchasing from QuickRev`);
-      } else {
-        notes.push(`• Installation rates shown are for tires purchased elsewhere`);
-      }
-    } else {
+    } else if (!includeInstallation && !bundleItems.length) {
       notes.push(`• Installation not included — ask for installation rates`);
     }
 

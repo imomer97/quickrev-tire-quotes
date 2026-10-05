@@ -974,25 +974,25 @@ export default function SearchPanel({ tires, updateTire, deleteTire, addTire, bu
 
   // === BUNDLE EDITOR (quote panel) ===
   // Open the editor for a bundle line item, pre-filled from the item's stored
-  // bundle fields (rimSku / tireSize / tireUnit / installRate).
+  // bundle fields (rimSku / tireSize / tireUnit / rimUnit).
   const startEditBundle = (item) => {
     setEditingBundleId(item.id);
     setBundleForm({
       rimSku: item.rimSku || '',
       tireSize: item.tireSize || parseTireSize(item.size)?.rim || '',
       tireName: item.tireName || '',
-      tireUnit: (item.tireUnit != null ? item.tireUnit : ((parseFloat(item.price) || 0) - (item.installRate || 0)) / 4).toFixed(2),
-      installRate: item.installRate != null ? item.installRate : '',
+      tireUnit: (item.tireUnit != null ? item.tireUnit : ((parseFloat(item.price) || 0) - (item.rimUnit || 0) * 4) / 4).toFixed(2),
+      rimUnit: item.rimUnit != null ? item.rimUnit : '',
     });
   };
 
   // Save: rewrite the line item's label/size/price from the edited fields.
-  // Price = tires × 4 + install rate (bundle is one line, priced as a set).
+  // Price = (tires × 4) + (rims × 4) — the bundle is one line, Qty 1.
   const saveBundleEdit = () => {
     if (!bundleForm) return;
     const tireUnit = Math.max(0, parseFloat(bundleForm.tireUnit) || 0);
-    const installRate = Math.max(0, parseFloat(bundleForm.installRate) || 0);
-    const total = +(tireUnit * 4 + installRate).toFixed(2);
+    const rimUnitNum = Math.max(0, parseFloat(bundleForm.rimUnit) || 0);
+    const total = +(tireUnit * 4 + rimUnitNum * 4).toFixed(2);
     setQuoteItems(prev => prev.map(item => {
       if (item.id !== editingBundleId) return item;
       const bolt = item.bolt || (String(item.size || '').match(/·\s*(\dX\d{2,3}(?:\.\d+)?)/) || [])[1] || '';
@@ -1003,9 +1003,9 @@ export default function SearchPanel({ tires, updateTire, deleteTire, addTire, bu
         tireSize: bundleForm.tireSize.trim(),
         tireName: name,
         tireUnit,
-        installRate,
-        // Keep the set-of-4 quantity and product size on the PDF line
-        bundleQty: item.bundleQty || 4,
+        rimUnit: rimUnitNum,
+        // Keep the product size on the PDF line
+        bundleQty: 1,
         bolt,
         model: `${bundleForm.rimSku.trim() ? `${bundleForm.rimSku.trim()} × ` : ''}${bundleForm.tireSize.trim()}${name ? ` ${name}` : ''} Bundle`.replace(/^\s*/, ''),
         size: `${bundleForm.tireSize.trim()}${bolt ? ` · ${bolt}` : ''}`,
@@ -2228,7 +2228,7 @@ ${stockText}
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-lg p-6 max-w-sm w-full">
             <h2 className="text-lg font-bold mb-1">Edit Bundle</h2>
-            <p className="text-xs text-muted mb-4">Adjust the rim SKU, tire size, per-tire price, or install rate — the line total recomputes as 4 × tire + install.</p>
+            <p className="text-xs text-muted mb-4">Adjust the rim SKU, tire size, or per-tire / per-rim prices — the bundle total recomputes as 4 × tire + 4 × rim (installation is its own line).</p>
             <div className="flex-col gap-3 mb-4">
               <div>
                 <label className="text-sm font-medium mb-1 block">Rim SKU</label>
@@ -2272,21 +2272,21 @@ ${stockText}
                 />
               </div>
               <div>
-                <label className="text-sm font-medium mb-1 block">Install rate ($ / set)</label>
+                <label className="text-sm font-medium mb-1 block">Rim price (each)</label>
                 <input
                   type="number"
                   step="0.01"
                   min="0"
                   className="input"
-                  value={bundleForm.installRate}
-                  onChange={(e) => setBundleForm(f => ({ ...f, installRate: e.target.value }))}
+                  value={bundleForm.rimUnit}
+                  onChange={(e) => setBundleForm(f => ({ ...f, rimUnit: e.target.value }))}
                 />
               </div>
               <div className="bg-slate-50 rounded-lg p-3 text-sm flex justify-between font-medium">
-                <span>Bundle total (pre-tax)</span>
+                <span>Bundle total (4 tires + 4 rims)</span>
                 <span className="font-mono">{formatCurrency(
                   (Math.max(0, parseFloat(bundleForm.tireUnit) || 0)) * 4 +
-                  (Math.max(0, parseFloat(bundleForm.installRate) || 0))
+                  (Math.max(0, parseFloat(bundleForm.rimUnit) || 0)) * 4
                 )}</span>
               </div>
             </div>
