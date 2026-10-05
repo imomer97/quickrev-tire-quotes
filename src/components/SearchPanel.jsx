@@ -995,7 +995,7 @@ export default function SearchPanel({ tires, updateTire, deleteTire, addTire, bu
     const total = +(tireUnit * 4 + installRate).toFixed(2);
     setQuoteItems(prev => prev.map(item => {
       if (item.id !== editingBundleId) return item;
-      const bolt = (String(item.size || '').match(/·\s*(\dX\d{2,3}(?:\.\d+)?)/) || [])[1] || '';
+      const bolt = item.bolt || (String(item.size || '').match(/·\s*(\dX\d{2,3}(?:\.\d+)?)/) || [])[1] || '';
       const name = bundleForm.tireName.trim();
       return {
         ...item,
@@ -1004,8 +1004,11 @@ export default function SearchPanel({ tires, updateTire, deleteTire, addTire, bu
         tireName: name,
         tireUnit,
         installRate,
+        // Keep the set-of-4 quantity and product size on the PDF line
+        bundleQty: item.bundleQty || 4,
+        bolt,
         model: `${bundleForm.rimSku.trim() ? `${bundleForm.rimSku.trim()} × ` : ''}${bundleForm.tireSize.trim()}${name ? ` ${name}` : ''} Bundle`.replace(/^\s*/, ''),
-        size: `${bundleForm.tireSize.trim()} · 4 tires${bolt ? ` · ${bolt}` : ''} · install ${formatCurrency(installRate)}/set`,
+        size: `${bundleForm.tireSize.trim()}${bolt ? ` · ${bolt}` : ''}`,
         price: total,
       };
     }));

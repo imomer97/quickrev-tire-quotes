@@ -142,7 +142,12 @@ export function generateOptionsPDF({
   doc.text('Quantity:', margin, y);
   doc.setFont('helvetica', 'normal');
   // Total pieces quoted — the sum of each line's Qty column
-  const totalPieces = tires.reduce((sum, t) => sum + (t.isService ? 0 : (quantityFor ? quantityFor(t) : quantity)), 0);
+  const totalPieces = tires.reduce((sum, t) => {
+    // Bundles cover a set of tires — count the set (bundleQty) so the header
+    // reflects real coverage, not the 1 line item.
+    if (t.isBundle) return sum + (t.bundleQty || 4);
+    return sum + (t.isService ? 0 : (quantityFor ? quantityFor(t) : quantity));
+  }, 0);
   doc.text(`${totalPieces} item${totalPieces === 1 ? '' : 's'}`, margin + 30, y);
   y += 6;
 
@@ -193,7 +198,9 @@ export function generateOptionsPDF({
     // Installation-service line items are priced as one job (their `price` is
     // the full install total), so they never multiply by the quote quantity.
     // Other lines honor their per-item quantity when provided.
-    const itemQty = tire.isService ? 1 : (quantityFor ? quantityFor(tire) : quantity);
+    const itemQty = tire.isService
+      ? (tire.bundleQty || 1)  // bundles show their set size (4) in Qty
+      : (quantityFor ? quantityFor(tire) : quantity);
 
     // Sale-aware pricing (matches the item cards). Free items price at $0.
     const tirePrice = getEffectiveRetail(tire);
@@ -269,7 +276,7 @@ export function generateOptionsPDF({
       tire.model,
       sizeCell,
       tire.season || '—',
-      tire.isService ? '—' : (itemQty != null ? String(itemQty) : tire.stock.toString()),
+      String(itemQty != null ? itemQty : tire.stock),
       formatCurrency(tirePrice),  // effective price (sale while active, else regular)
     ];
     if (showPeriod) row.push(salePeriod);               // e.g. "Aug 1 – 15" or "until Aug 15"
@@ -380,6 +387,11 @@ export function generateOptionsPDF({
       const cell = hookData && hookData.cell;
       const colIdx = cell && cell.column ? cell.column.index : (hookData && hookData.column ? hookData.column.index : undefined);
       const section = hookData ? hookData.section : undefined;
+      // Bold the Total column so the final price stands out on the page.
+      if (section === 'body' && colIdx === col.total) {
+        cell.styles.fontStyle = 'bold';
+        return;
+      }
       if (section === 'body' && colIdx === col.category) {
         // One-word category tab in the first column: tire=black, wheel=blue,
         // part=orange. B&W theme keeps everything plain black.
@@ -389,6 +401,16 @@ export function generateOptionsPDF({
         else if (cat === 'part') cell.textColor = [214, 80, 41];
         else if (cat === 'service') cell.textColor = [22, 130, 93];
         else cell.textColor = [40, 40, 40];
+      }
+      // Bundles: split the Model cell into two readable lines — rim SKU on
+      // the first line, tire brand/model + "Bundle" on the second.
+      if (section === 'body' && colIdx === col.model) {
+        const raw = String(cell.raw || '');
+        const m = raw.match(/^(.{0,24}?\bS[A-Z0-9]{4,8}) × (.+)$/i);
+        if (m) {
+          cell.text = [m[1], `× ${m[2]}`];
+          cell.styles.fontStyle = 'bold';
+        }
       }
     },
     margin: { left: margin, right: margin },
@@ -435,9 +457,17 @@ export function generateOptionsPDF({
     const notes = [];
 
     // Installation-service line items (customer-supplied tires)
-    tires.filter(t => t.isService).forEach(t => {
+    tires.filter(t => t.isService && !t.isBundle).forEach(t => {
       notes.push(`• ${t.brand} ${t.model}: ${t.serviceDesc || 'installation'} — ${formatCurrency(t.servicePerUnit || 0)} per ${t.serviceUnit || 'tire'} × ${t.serviceQty || 1} ${t.serviceUnit || 'tire'}${(t.serviceQty || 1) === 1 ? '' : 's'}, quoted as one job`);
     });
+
+    // Bundles: ONE global note instead of a repeated bullet per option —
+    // every bundle in the quote carries the same install rate.
+    const bundleItems = tires.filter(t => t.isBundle);
+    if (bundleItems.length > 0) {
+      const rates = [...new Set(bundleItems.map(t => formatCurrency(t.installRate || 0)))];
+      notes.push(`• All ${bundleItems.length} bundle option${bundleItems.length === 1 ? '' : 's'} include a ${rates.join(' / ')}/set installation fee, quoted as a single job (off-rims mounting, balancing, valve stems)`);
+    }
 
     // Only add installation notes if installation is included
     if (includeInstallation) {

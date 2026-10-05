@@ -129,9 +129,12 @@ export default function BundleBuilder({ tires = [], fitments = [], pricingConfig
       brand: 'QuickRev',
       // Nice PDF label, e.g. "STX81257H × 225/50R18 OVATION WV-688 Bundle"
       model: `${rimSku ? `${rimSku} × ` : ''}${normInput}${brandModel ? ` ${brandModel}` : ''} Bundle`,
-      size: `${normInput} · 4 tires${bolt ? ` · ${bolt}` : ''} · install ${formatCurrency(installRate)}/set`,
+      // Size column on the PDF keeps only the product specs; qty lives in the
+      // Qty column (bundleQty) and the install rate is a global pricing note.
+      size: `${normInput}${bolt ? ` · ${bolt}` : ''}`,
       price: +(setPrice(retail) + installRate).toFixed(2),
-      season: 'None',
+      // Season pulls from the source tire (e.g. Winter) so the PDF shows it.
+      season: tire.season || 'None',
       tier: 'service',
       stock: 1,
       includeInstall: false,
@@ -143,6 +146,8 @@ export default function BundleBuilder({ tires = [], fitments = [], pricingConfig
       tireName: brandModel,
       tireUnit: +retail.toFixed(2),
       installRate: +installRate.toFixed(2),
+      // The bundle covers a set of 4 — shown in the PDF's Qty column.
+      bundleQty: 4,
       quoteQty: 1,
       _transient: true,
     };
