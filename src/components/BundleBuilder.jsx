@@ -506,6 +506,9 @@ export default function BundleBuilder({ tires = [], fitments = [], pricingConfig
             <tbody>
               {tireOptions.map(({ tire, retail }) => {
                 const bundleName = `${selectedRim ? selectedRim.sku : '? SKU'} × ${normInput} ${[tire.brand, tire.model].filter(Boolean).join(' ')} Bundle`.trim();
+                // Distributor label — the same tire can exist under multiple
+                // distributors at different prices; show which one each row uses.
+                const distName = (distributors.find(d => d.id === tire.distributorId) || {}).name || tire.distributorId || '';
                 return (
                   <tr
                     key={tire.id}
@@ -519,7 +522,7 @@ export default function BundleBuilder({ tires = [], fitments = [], pricingConfig
                           : <Square className="w-4 h-4 text-muted" />}
                       </button>
                     </td>
-                    <td className="px-3 py-2 font-semibold text-primary">{bundleName}</td>
+                    <td className="px-3 py-2 font-semibold text-primary">{bundleName}{distName && <span className="text-xs text-muted font-normal"> · {distName}</span>}</td>
                     <td className="px-3 py-2">{[tire.brand, tire.model].filter(Boolean).join(' ') || '—'}</td>
                     <td className="px-3 py-2 whitespace-nowrap">
                       {tire.size}
