@@ -2,6 +2,7 @@ import { useState } from 'react';
 import Header from './components/Header.jsx';
 import SearchPanel from './components/SearchPanel.jsx';
 import FitmentFinder from './components/FitmentFinder.jsx';
+import BundleBuilder from './components/BundleBuilder.jsx';
 import ImportPanel from './components/ImportPanel.jsx';
 import CustomersPage from './components/CustomersPage.jsx';
 import SettingsPage from './components/SettingsPage.jsx';
@@ -16,6 +17,13 @@ export default function App() {
   // Quote history is shared with the Customers tab; loaded once here and
   // passed down so both views show the same data.
   const { quotes: quoteHistory, refresh: refreshQuoteHistory } = useQuoteHistory();
+  // Bundles queued from the Bundle Builder tab, consumed as quote line items
+  // by the Search & Quote tab (one line per bundle: tires × 4 + install).
+  const [pendingBundles, setPendingBundles] = useState([]);
+  const addBundlesToQuote = (items) => {
+    setPendingBundles(prev => [...prev, ...items]);
+    setActiveTab('search');
+  };
   const {
     tires,
     isLoading,
@@ -50,6 +58,7 @@ export default function App() {
     setPricingConfig,
     fitments,
     addFitment,
+    setFitments,
   } = useTireData();
 
   return (
@@ -80,6 +89,8 @@ export default function App() {
             onAddDistributor={addDistributor}
             preload={quotePreload}
             onPreloadConsumed={() => setQuotePreload(null)}
+            pendingBundles={pendingBundles}
+            onPendingBundlesConsumed={() => setPendingBundles([])}
             pricingConfig={pricingConfig}
             setPricingConfig={setPricingConfig}
           />
@@ -90,6 +101,15 @@ export default function App() {
             onAddFitment={addFitment}
             addTire={addTire}
             tires={tires}
+          />
+        )}
+        {activeTab === 'bundles' && (
+          <BundleBuilder
+            tires={tires}
+            fitments={fitments}
+            pricingConfig={pricingConfig}
+            setPricingConfig={setPricingConfig}
+            onAddBundles={addBundlesToQuote}
           />
         )}
         {activeTab === 'customers' && (
@@ -121,6 +141,8 @@ export default function App() {
             distributors={distributors}
             addDistributor={addDistributor}
             removeDistributor={removeDistributor}
+            fitments={fitments}
+            setFitments={setFitments}
           />
         )}
       </main>

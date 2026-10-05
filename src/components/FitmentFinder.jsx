@@ -14,6 +14,16 @@ function normalize(s) {
   return String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
 }
 
+// Year-range fitments ("2025-2027", from the Rim Guide import) — a single
+// selected year matches when it falls inside the range.
+function yearMatches(f, year) {
+  const y = String(f.year || '').trim();
+  if (!year || !y) return true;
+  const m = y.match(/^(\d{4})-(\d{4})$/);
+  if (m) return +year >= Math.min(+m[1], +m[2]) && +year <= Math.max(+m[1], +m[2]);
+  return y === String(year);
+}
+
 export default function FitmentFinder({ fitments = [], onAddFitment, addTire, tires = [], distributorId = 'canadaTire' }) {
   const [year, setYear] = useState('');
   const [make, setMake] = useState('');
@@ -24,14 +34,26 @@ export default function FitmentFinder({ fitments = [], onAddFitment, addTire, ti
 
   const years = useMemo(() => {
     const set = new Set();
-    for (const f of fitments) if (f.year) set.add(String(f.year));
+    for (const f of fitments) {
+      const y = String(f.year || '').trim();
+      if (!y) continue;
+      const m = y.match(/^(\d{4})-(\d{4})$/);
+      if (m) {
+        // Cap range expansion so one huge row can't explode the dropdown.
+        const lo = Math.min(+m[1], +m[2]), hi = Math.max(+m[1], +m[2]);
+        if (hi - lo <= 60) for (let i = lo; i <= hi; i++) set.add(String(i));
+        else set.add(y);
+      } else {
+        set.add(y);
+      }
+    }
     return [...set].sort((a, b) => b - a);
   }, [fitments]);
 
   const makes = useMemo(() => {
     const set = new Set();
     for (const f of fitments) {
-      if (year && String(f.year) !== year) continue;
+      if (year && !yearMatches(f, year)) continue;
       if (f.make) set.add(f.make);
     }
     return [...set].sort();
@@ -40,7 +62,7 @@ export default function FitmentFinder({ fitments = [], onAddFitment, addTire, ti
   const models = useMemo(() => {
     const set = new Set();
     for (const f of fitments) {
-      if (year && String(f.year) !== year) continue;
+      if (year && !yearMatches(f, year)) continue;
       if (make && f.make !== make) continue;
       if (f.model) set.add(f.model);
     }
@@ -50,7 +72,7 @@ export default function FitmentFinder({ fitments = [], onAddFitment, addTire, ti
   const trims = useMemo(() => {
     const set = new Set();
     for (const f of fitments) {
-      if (year && String(f.year) !== year) continue;
+      if (year && !yearMatches(f, year)) continue;
       if (make && f.make !== make) continue;
       if (model && f.model !== model) continue;
       if (f.trim) set.add(f.trim);
@@ -61,7 +83,7 @@ export default function FitmentFinder({ fitments = [], onAddFitment, addTire, ti
   const results = useMemo(() => {
     const y = normalize(year), ma = normalize(make), mo = normalize(model), t = normalize(trim);
     return fitments.filter(f => {
-      if (y && normalize(f.year) !== y) return false;
+      if (y && !yearMatches(f, year)) return false;
       if (ma && normalize(f.make) !== ma) return false;
       if (mo) {
         const normFitModel = normalize(f.model);

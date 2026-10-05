@@ -1,8 +1,9 @@
 import { useState, useRef, useEffect } from 'react';
-import { Upload, Trash2, Database, AlertCircle, CheckCircle, RefreshCw, Search, Download } from 'lucide-react';
+import { Upload, Trash2, Database, AlertCircle, CheckCircle, RefreshCw, Search, Download, BookOpen } from 'lucide-react';
 import Papa from 'papaparse';
+import { parseRimGuideMd, mergeFitments } from '../utils/parseRimGuide.js';
 
-export default function ImportPanel({ tires, importFromCSV, clearAll, loadSampleData, deleteTires, syncCanadaTire, syncAllWarehouses, syncAllRunning, checkApiHealth, apiStatus, isLoading, warehouseLocations, lastSyncAt, fetchWarehouseLocations, addWarehouseLocations, exportData, importData, cloudStatus, distributors, addDistributor, removeDistributor }) {
+export default function ImportPanel({ tires, importFromCSV, clearAll, loadSampleData, deleteTires, syncCanadaTire, syncAllWarehouses, syncAllRunning, checkApiHealth, apiStatus, isLoading, warehouseLocations, lastSyncAt, fetchWarehouseLocations, addWarehouseLocations, exportData, importData, cloudStatus, distributors, addDistributor, removeDistributor, fitments = [], setFitments }) {
   const [dragActive, setDragActive] = useState(false);
   const [importResult, setImportResult] = useState(null);
   const [selectedRows, setSelectedRows] = useState(new Set());
@@ -15,6 +16,10 @@ export default function ImportPanel({ tires, importFromCSV, clearAll, loadSample
   const ROWS_PER_PAGE = 100;
   const fileInputRef = useRef(null);
   const jsonInputRef = useRef(null);
+  const rimGuideInputRef = useRef(null);
+  // Rim Guide markdown import: parsed rows waiting for a merge/replace click.
+  const [rimGuideParsed, setRimGuideParsed] = useState(null); // { fitments, skipped, name }
+  const [rimGuideMsg, setRimGuideMsg] = useState(null); // { type, message }
 
   useEffect(() => {
     checkApiHealth();
@@ -425,6 +430,117 @@ export default function ImportPanel({ tires, importFromCSV, clearAll, loadSample
           Custom distributors appear in the search filters and on the Add Tire form.
           New distributors are shared across your devices with cloud sync.
         </p>
+      </div>
+
+      {/* === RIM GUIDE FITMENTS === */}
+      <div className="card p-6">
+        <h2 className="text-lg font-semibold mb-2 flex items-center gap-2">
+          <BookOpen className="w-5 h-5 text-accent" />
+          Rim Guide Fitments (Markdown)
+        </h2>
+        <p className="text-sm text-muted mb-3">
+          Import a STARCO Rim Guide markdown export (Model | Trim | Years | Size | Bolt | SKUs | Notes tables).
+          Rows land in the fitment database used by the Fitment Finder and Bundle Builder, and are shared with your other devices via cloud sync.
+        </p>
+        <div className="flex flex-wrap gap-2 mb-3">
+          <input
+            ref={rimGuideInputRef}
+            type="file"
+            accept=".md,.markdown,.txt"
+            className="hidden"
+            onChange={(e) => {
+              const file = e.target.files && e.target.files[0];
+              if (!file) return;
+              const reader = new FileReader();
+              reader.onload = () => {
+                try {
+                  const parsed = parseRimGuideMd(String(reader.result), file.name.replace(/\.md$/i, ''));
+                  if (!parsed.fitments.length) {
+                    setRimGuideMsg({ type: 'error', message: 'No fitment rows found — is this a Rim Guide markdown export (## MAKE sections with 8-column tables)?' });
+                  } else {
+                    setRimGuideParsed({ ...parsed, name: file.name });
+                    setRimGuideMsg({ type: 'success', message: `Parsed ${parsed.fitments.length} fitment row(s) from ${file.name}${parsed.skipped ? ` — ${parsed.skipped} junk/empty row(s) skipped` : ''}. Review below, then Merge or Replace.` });
+                  }
+                } catch (err) {
+                  setRimGuideMsg({ type: 'error', message: `Parse error: ${err.message}` });
+                }
+              };
+              reader.readAsText(file);
+              e.target.value = '';
+            }}
+          />
+          <button className="btn btn-primary" onClick={() => rimGuideInputRef.current && rimGuideInputRef.current.click()}>
+            <Upload className="w-4 h-4" />
+            Choose Rim Guide .md file
+          </button>
+          {rimGuideParsed && (
+            <>
+              <button
+                className="btn btn-outline"
+                onClick={() => {
+                  const added = mergeFitments(fitments, rimGuideParsed.fitments);
+                  setFitments([...fitments, ...added]);
+                  setRimGuideMsg({ type: 'success', message: `Merged: ${added.length} new fitment(s) added, ${rimGuideParsed.fitments.length - added.length} already present.` });
+                  setRimGuideParsed(null);
+                }}
+              >
+                Merge {rimGuideParsed.fitments.length} row(s)
+              </button>
+              <button
+                className="btn btn-danger"
+                onClick={() => {
+                  if (window.confirm(`Replace the fitment database (${fitments.length} row(s)) with ${rimGuideParsed.fitments.length} imported row(s)?`)) {
+                    setFitments(rimGuideParsed.fitments);
+                    setRimGuideMsg({ type: 'success', message: `Replaced fitment database with ${rimGuideParsed.fitments.length} row(s).` });
+                    setRimGuideParsed(null);
+                  }
+                }}
+                title="Delete existing fitments and use only the imported rows"
+              >
+                Replace all
+              </button>
+            </>
+          )}
+        </div>
+        {rimGuideMsg && (
+          <p className={`text-sm mb-2 ${rimGuideMsg.type === 'error' ? 'text-danger' : 'text-success'}`}>{rimGuideMsg.message}</p>
+        )}
+        {rimGuideParsed && rimGuideParsed.fitments.length > 0 && (
+          <div className="overflow-x-auto max-h-72 overflow-y-auto border border-slate-200 rounded">
+            <table className="w-full text-sm">
+              <thead className="sticky top-0 bg-white">
+                <tr className="border-b text-left text-xs uppercase text-muted">
+                  <th className="px-2 py-1">Make</th>
+                  <th className="px-2 py-1">Model</th>
+                  <th className="px-2 py-1">Trim</th>
+                  <th className="px-2 py-1">Years</th>
+                  <th className="px-2 py-1">Rim</th>
+                  <th className="px-2 py-1">Bolt</th>
+                  <th className="px-2 py-1">Exact SKUs</th>
+                  <th className="px-2 py-1">Multi SKUs</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rimGuideParsed.fitments.slice(0, 200).map((f, i) => (
+                  <tr key={i} className="border-b border-slate-100">
+                    <td className="px-2 py-1 font-medium">{f.make}</td>
+                    <td className="px-2 py-1">{f.model}</td>
+                    <td className="px-2 py-1 text-muted">{f.trim || '—'}</td>
+                    <td className="px-2 py-1 text-muted">{f.year || '—'}</td>
+                    <td className="px-2 py-1">{f.rimSize ? `${f.rimSize}"` : '—'}</td>
+                    <td className="px-2 py-1 font-mono text-xs">{f.boltPattern || '—'}</td>
+                    <td className="px-2 py-1 font-mono text-xs text-emerald-700">{f.exactFitSkus || '—'}</td>
+                    <td className="px-2 py-1 font-mono text-xs text-slate-500">{f.multiFitSkus || '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {rimGuideParsed.fitments.length > 200 && (
+              <p className="px-2 py-1 text-xs text-muted">…and {rimGuideParsed.fitments.length - 200} more row(s)</p>
+            )}
+          </div>
+        )}
+        <p className="text-xs text-muted mt-2">{fitments.length} fitment(s) currently in database.</p>
       </div>
 
       {/* === INVENTORY TABLE === */}

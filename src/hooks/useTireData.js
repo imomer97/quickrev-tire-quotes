@@ -895,6 +895,9 @@ export function useTireData() {
     removeDistributor,
     fitments,
     addFitment: (f) => setFitments(prev => [...prev, f]),
+    // Bulk import: replace or merge the fitment list (used by the Rim Guide
+    // importer). The cloud-sync effect picks the change up automatically.
+    setFitments,
     pricingConfig,
     setPricingConfig: updatePricingConfig,
     exportData,

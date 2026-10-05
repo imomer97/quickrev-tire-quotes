@@ -72,6 +72,26 @@ export default function SettingsPage({ pricingConfig, setPricingConfig }) {
         </p>
       </div>
 
+      {/* Bundle install rate */}
+      <div className="border border-slate-200 rounded-lg p-4">
+        <h3 className="font-semibold mb-2">Bundle Install Rate</h3>
+        <p className="text-xs text-muted mb-3">
+          Installation rate per set of 4 tires shown on Bundle Builder rows (e.g. rim + tire bundles).
+        </p>
+        <div className="flex items-center gap-2">
+          <span className="text-sm font-medium">$</span>
+          <input
+            type="number"
+            step="0.01"
+            min="0"
+            className="input w-24"
+            value={cfg.bundleInstallRate ?? 50}
+            onChange={(e) => { setPricingConfig({ ...cfg, bundleInstallRate: parseFloat(e.target.value) || 0 }); flashSaved(); }}
+          />
+          <span className="text-sm font-medium">/ set</span>
+        </div>
+      </div>
+
       {/* Pricing mode */}
       <div className="border border-slate-200 rounded-lg p-4">
         <h3 className="font-semibold mb-2">Pricing Mode</h3>

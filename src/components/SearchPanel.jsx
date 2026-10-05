@@ -126,7 +126,7 @@ import {
 import { generateOptionsPDF } from '../utils/pdfGenerator.js';
 import { useQuoteHistory, loadEmailTemplate, saveEmailTemplate, renderEmailTemplate, DEFAULT_EMAIL_TEMPLATE } from '../hooks/useQuoteHistory.js';
 
-export default function SearchPanel({ tires, updateTire, deleteTire, addTire, bulkUpdateTires, warehouseLocations, distributors, onAddDistributor, preload, onPreloadConsumed, pricingConfig, setPricingConfig }) {
+export default function SearchPanel({ tires, updateTire, deleteTire, addTire, bulkUpdateTires, warehouseLocations, distributors, onAddDistributor, preload, onPreloadConsumed, pricingConfig, setPricingConfig, pendingBundles, onPendingBundlesConsumed }) {
   const isB2B = !!(pricingConfig && pricingConfig.wholesale);
   // === SEARCH & FILTERS ===
   const [searchSize, setSearchSize] = useState('');
@@ -278,6 +278,15 @@ export default function SearchPanel({ tires, updateTire, deleteTire, addTire, bu
     setPreloadedCustomer(preload);
     if (onPreloadConsumed) onPreloadConsumed();
   }, [preload]);
+  // === BUNDLE PRELOAD (from the Bundle Builder tab) ===
+  // Each pending bundle arrives as a ready-made quote line item (tires × 4
+  // plus the installation rate in one price) and is appended to the quote.
+  useEffect(() => {
+    if (!pendingBundles || pendingBundles.length === 0) return;
+    setQuoteItems(prev => [...prev, ...pendingBundles]);
+    setManualQuoteOrder(true);
+    if (onPendingBundlesConsumed) onPendingBundlesConsumed();
+  }, [pendingBundles]);
   // === BULK EDIT ===
   const [showBulkEdit, setShowBulkEdit] = useState(false);
   const [bulkMsg, setBulkMsg] = useState(null);
@@ -302,6 +311,9 @@ export default function SearchPanel({ tires, updateTire, deleteTire, addTire, bu
   const [showAddModal, setShowAddModal] = useState(false);
   const [showInstallServiceModal, setShowInstallServiceModal] = useState(false);
   const [installServiceForm, setInstallServiceForm] = useState(null);
+  // === BUNDLE LINE-ITEM EDITOR (quote panel) ===
+  const [editingBundleId, setEditingBundleId] = useState(null);
+  const [bundleForm, setBundleForm] = useState(null); // { rimSku, tireSize, tireName, tireUnit, installRate }
   const [newTireForm, setNewTireForm] = useState({
     brand: '',
     model: '',
@@ -911,6 +923,47 @@ export default function SearchPanel({ tires, updateTire, deleteTire, addTire, bu
     if (quoteItems.length === 0) return;
     setQuoteItems([]);
     setManualQuoteOrder(false);
+  };
+
+  // === BUNDLE EDITOR (quote panel) ===
+  // Open the editor for a bundle line item, pre-filled from the item's stored
+  // bundle fields (rimSku / tireSize / tireUnit / installRate).
+  const startEditBundle = (item) => {
+    setEditingBundleId(item.id);
+    setBundleForm({
+      rimSku: item.rimSku || '',
+      tireSize: item.tireSize || parseTireSize(item.size)?.rim || '',
+      tireName: item.tireName || '',
+      tireUnit: (item.tireUnit != null ? item.tireUnit : ((parseFloat(item.price) || 0) - (item.installRate || 0)) / 4).toFixed(2),
+      installRate: item.installRate != null ? item.installRate : '',
+    });
+  };
+
+  // Save: rewrite the line item's label/size/price from the edited fields.
+  // Price = tires × 4 + install rate (bundle is one line, priced as a set).
+  const saveBundleEdit = () => {
+    if (!bundleForm) return;
+    const tireUnit = Math.max(0, parseFloat(bundleForm.tireUnit) || 0);
+    const installRate = Math.max(0, parseFloat(bundleForm.installRate) || 0);
+    const total = +(tireUnit * 4 + installRate).toFixed(2);
+    setQuoteItems(prev => prev.map(item => {
+      if (item.id !== editingBundleId) return item;
+      const bolt = (String(item.size || '').match(/·\s*(\dX\d{2,3}(?:\.\d+)?)/) || [])[1] || '';
+      const name = bundleForm.tireName.trim();
+      return {
+        ...item,
+        rimSku: bundleForm.rimSku.trim(),
+        tireSize: bundleForm.tireSize.trim(),
+        tireName: name,
+        tireUnit,
+        installRate,
+        model: `${bundleForm.rimSku.trim() ? `${bundleForm.rimSku.trim()} × ` : ''}${bundleForm.tireSize.trim()}${name ? ` ${name}` : ''} Bundle`.replace(/^\s*/, ''),
+        size: `${bundleForm.tireSize.trim()} · 4 tires${bolt ? ` · ${bolt}` : ''} · install ${formatCurrency(installRate)}/set`,
+        price: total,
+      };
+    }));
+    setEditingBundleId(null);
+    setBundleForm(null);
   };
 
   // === QUOTE DRAG-TO-REORDER ===
@@ -1954,6 +2007,11 @@ ${stockText}
                         onChange={(e) => setQuoteItemQty(item.id, e.target.value)}
                       />
                     )}
+                    {item.isBundle && (
+                      <button className="btn btn-sm btn-ghost p-1" onClick={() => startEditBundle(item)} title="Edit bundle (rim SKU, size, install rate)">
+                        <Pencil className="w-4 h-4 text-accent" />
+                      </button>
+                    )}
                     <button className="btn btn-sm btn-ghost p-1 text-danger" onClick={() => removeFromQuote(item.id)} title="Remove from quote">
                       <X className="w-4 h-4" />
                     </button>
@@ -2053,6 +2111,87 @@ ${stockText}
                 Add to Quote
               </button>
               <button className="btn btn-ghost flex-1" onClick={() => setShowInstallServiceModal(false)}>
+                <X className="w-4 h-4" />
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* === BUNDLE EDITOR MODAL === */}
+      {editingBundleId && bundleForm && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg p-6 max-w-sm w-full">
+            <h2 className="text-lg font-bold mb-1">Edit Bundle</h2>
+            <p className="text-xs text-muted mb-4">Adjust the rim SKU, tire size, per-tire price, or install rate — the line total recomputes as 4 × tire + install.</p>
+            <div className="flex-col gap-3 mb-4">
+              <div>
+                <label className="text-sm font-medium mb-1 block">Rim SKU</label>
+                <input
+                  type="text"
+                  className="input"
+                  placeholder="e.g., STX81257H"
+                  value={bundleForm.rimSku}
+                  onChange={(e) => setBundleForm(f => ({ ...f, rimSku: e.target.value }))}
+                />
+              </div>
+              <div>
+                <label className="text-sm font-medium mb-1 block">Tire size</label>
+                <input
+                  type="text"
+                  className="input"
+                  placeholder="e.g., 225/50R18"
+                  value={bundleForm.tireSize}
+                  onChange={(e) => setBundleForm(f => ({ ...f, tireSize: e.target.value }))}
+                />
+              </div>
+              <div>
+                <label className="text-sm font-medium mb-1 block">Tire brand / model</label>
+                <input
+                  type="text"
+                  className="input"
+                  placeholder="e.g., OVATION WV-688"
+                  value={bundleForm.tireName}
+                  onChange={(e) => setBundleForm(f => ({ ...f, tireName: e.target.value }))}
+                />
+              </div>
+              <div>
+                <label className="text-sm font-medium mb-1 block">Tire price (each)</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  className="input"
+                  value={bundleForm.tireUnit}
+                  onChange={(e) => setBundleForm(f => ({ ...f, tireUnit: e.target.value }))}
+                />
+              </div>
+              <div>
+                <label className="text-sm font-medium mb-1 block">Install rate ($ / set)</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  className="input"
+                  value={bundleForm.installRate}
+                  onChange={(e) => setBundleForm(f => ({ ...f, installRate: e.target.value }))}
+                />
+              </div>
+              <div className="bg-slate-50 rounded-lg p-3 text-sm flex justify-between font-medium">
+                <span>Bundle total (pre-tax)</span>
+                <span className="font-mono">{formatCurrency(
+                  (Math.max(0, parseFloat(bundleForm.tireUnit) || 0)) * 4 +
+                  (Math.max(0, parseFloat(bundleForm.installRate) || 0))
+                )}</span>
+              </div>
+            </div>
+            <div className="flex gap-2">
+              <button className="btn btn-success flex-1" onClick={saveBundleEdit}>
+                <Check className="w-4 h-4" />
+                Save Bundle
+              </button>
+              <button className="btn btn-ghost flex-1" onClick={() => { setEditingBundleId(null); setBundleForm(null); }}>
                 <X className="w-4 h-4" />
                 Cancel
               </button>
