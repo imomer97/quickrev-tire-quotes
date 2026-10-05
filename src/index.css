@@ -491,6 +491,47 @@ body {
   .lg-grid-cols-4 { grid-template-columns: repeat(4, 1fr); }
 }
 
+/* ==== Search & Quote: filter sidebar layout + extra utilities ====
+   The app uses a small hand-rolled utility set (no Tailwind), so the
+   classes used by the sidebar layout and accordion groups live here. */
+.min-w-0 { min-width: 0; }
+.shrink-0 { flex-shrink: 0; }
+.items-start { align-items: flex-start; }
+.overflow-y-auto { overflow-y: auto; }
+.whitespace-nowrap { white-space: nowrap; }
+.rounded-full { border-radius: 9999px; }
+.transition-transform { transition: transform 0.15s ease; }
+.rotate-180 { transform: rotate(180deg); }
+.leading-4 { line-height: 1rem; }
+.gap-1\.5 { gap: 0.375rem; }
+.max-h-44 { max-height: 11rem; }
+
+.filter-badge {
+  font-size: 10px;
+  font-weight: 700;
+  background: #0f172a;
+  color: #fff;
+  border-radius: 9999px;
+  padding: 0 6px;
+  line-height: 16px;
+}
+
+.filter-layout { display: flex; flex-direction: column; gap: 1.5rem; width: 100%; }
+.filter-sidebar { width: 100%; }
+.filter-main { width: 100%; }
+@media (min-width: 1024px) {
+  .filter-layout { flex-direction: row; align-items: flex-start; }
+  .filter-sidebar {
+    flex: 0 0 280px;
+    width: 280px;
+    position: sticky;
+    top: 128px;
+    max-height: calc(100vh - 150px);
+    overflow-y: auto;
+  }
+  .filter-main { flex: 1 1 0%; min-width: 0; }
+}
+
 /* Print styles for PDF */
 @media print {
   body { background: white; }

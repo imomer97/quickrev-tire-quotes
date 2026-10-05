@@ -90,6 +90,32 @@ function CustomerAutocomplete({ value, onChange, history, field = 'name', classN
     </div>
   );
 }
+
+/**
+ * Collapsible filter group for the sidebar. Common groups (size/category/tier)
+ * stay open by default; granular ones (bolt pattern, width, fitment) collapse
+ * to keep the sidebar scannable.
+ */
+function AccordionGroup({ title, defaultOpen = false, badge = null, children }) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <div className="border border-slate-200 rounded-lg">
+      <button
+        type="button"
+        className="w-full flex items-center justify-between px-2.5 py-2 text-left"
+        onClick={() => setOpen(o => !o)}
+        aria-expanded={open}
+      >
+        <span className="text-xs font-semibold text-muted uppercase">{title}</span>
+        <span className="flex items-center gap-1.5">
+          {badge}
+          <ChevronDown className={`w-4 h-4 text-muted transition-transform ${open ? 'rotate-180' : ''}`} />
+        </span>
+      </button>
+      {open && <div className="px-2.5 pb-2.5">{children}</div>}
+    </div>
+  );
+}
 import {
   Search, Download, Check, X, Pencil, Trash2, ChevronDown,
   FileText, CheckSquare, Square, Filter, ArrowUpDown,
@@ -183,6 +209,9 @@ export default function SearchPanel({ tires, updateTire, deleteTire, addTire, bu
   const [activeWidths, setActiveWidths] = useState(new Set());
   const [showBoltPatternInput, setShowBoltPatternInput] = useState(false);
   const [boltPatternInput, setBoltPatternInput] = useState('');
+  // Sidebar UX: collapsible Canada Tire warehouse list + its search box
+  const [ctExpanded, setCtExpanded] = useState(false);
+  const [ctWarehouseSearch, setCtWarehouseSearch] = useState('');
   // Free-text fitment tags (e.g. "2019 Escape", "MiniSuv", "M14X1.5")
   const [activeFitments, setActiveFitments] = useState(new Set());
   const [showFitmentInput, setShowFitmentInput] = useState(false);
@@ -306,6 +335,24 @@ export default function SearchPanel({ tires, updateTire, deleteTire, addTire, bu
     includeInstall: '',
     isFree: '',
   });
+
+  // === RESET FILTERS ===
+  // One-click escape hatch from an over-filtered state: clears the search box
+  // and every catalog filter (not the quote, PDF, or customer options).
+  const resetFilters = () => {
+    setSearchSize('');
+    setActiveDistributors(new Set());
+    setActiveTiers(new Set(Object.keys(TIERS)));
+    setActiveSeasons(new Set(SEASONS));
+    setActiveCategories(new Set(CATEGORY_KEYS));
+    setActiveBoltPatterns(new Set());
+    setActiveDiameters(new Set());
+    setActiveWidths(new Set());
+    setActiveFitments(new Set());
+    setInStockOnly(false);
+    setMinStock(quantity);
+    setCtWarehouseSearch('');
+  };
 
   // === ADD TIRE MODAL ===
   const [showAddModal, setShowAddModal] = useState(false);
@@ -1294,9 +1341,9 @@ ${stockText}
 
   return (
     <div className="flex-col gap-6">
-      {/* === SEARCH BAR & ADD TIRE === */}
-      <div className="card p-6">
-        <div className="flex flex-col gap-4">
+      {/* === STICKY SEARCH BAR & ADD TIRE === */}
+      <div className="card p-4 z-30" style={{ position: 'sticky', top: 52 }}>
+        <div className="flex flex-col gap-3">
           {/* Live equivalence hint: typing an imperial (flotation) size shows its
               metric conversion instantly, e.g. "35X12.50R20 → also matching 318/60R20".
               Reverse direction too: typing a metric size shows the closest flotation size. */}
@@ -1360,38 +1407,30 @@ ${stockText}
               <Wrench className="w-4 h-4" />
               Install Service
             </button>
+            <button
+              className="btn btn-outline"
+              onClick={resetFilters}
+              title="Clear the search box and every active filter"
+            >
+              <X className="w-4 h-4" />
+              Reset Filters
+            </button>
           </div>
 
           {/* === SEARCH HELP TEXT === */}
           <p className="text-xs text-muted ml-1">
-            💡 Search by size (205/55R16, 20555R16, or 2055516), brand, or model. Filter by wheel bolt pattern and vehicle fitment, stock, and category below.
+            💡 Search by size (205/55R16, 20555R16, or 2055516), brand, or model. Filters live in the left sidebar.
           </p>
+        </div>
+      </div>
 
-          {/* === PDF SIZE FIELD === */}
-          <div className="flex gap-3 flex-wrap items-end">
-            <div>
-              <label className="text-xs font-semibold text-muted mb-1 block uppercase">Item Size (PDF)</label>
-              <input
-                type="text"
-                className="input w-44 font-mono"
-                placeholder="e.g. 205/55R16"
-                value={pdfTireSize}
-                onChange={(e) => setPdfTireSize(e.target.value)}
-              />
-            </div>
-            <p className="text-xs text-muted pb-2">
-              Appears on the generated PDF only — independent of the search box.
-            </p>
-          </div>
-
-          {/* === FILTER TOGGLES === */}
-          <div className="flex flex-col gap-3">
+      <div className="filter-layout">
+        {/* === FILTER SIDEBAR === */}
+        <aside className="filter-sidebar card p-3 flex flex-col gap-2">
+          {/* === FILTER ACCORDIONS === */}
             {/* Availability filter — hides out-of-stock items and those short of the
                 minimum the quote requires. */}
-            <div>
-              <div className="flex items-center gap-2 mb-2">
-                <p className="text-xs font-semibold text-muted uppercase">Availability</p>
-              </div>
+            <AccordionGroup title="Availability" defaultOpen>
               <div className="flex flex-wrap gap-3 items-center">
                 <label className="flex items-center gap-2 cursor-pointer">
                   <input
@@ -1425,16 +1464,18 @@ ${stockText}
                   <span className="text-sm">Metric equiv.</span>
                 </label>
               </div>
-            </div>
+            </AccordionGroup>
 
-            <div>
-              <p className="text-xs font-semibold text-muted mb-2 uppercase">Distributors</p>
-              <div className="flex flex-wrap gap-2">
-                {distributorOptions.map(opt => (
-                  <label
-                    key={opt.id}
-                    className={`flex items-center gap-2 cursor-pointer ${opt.id.startsWith('ct:') ? 'ml-4' : ''}`}
-                  >
+            {/* Distributors: one checkbox per distributor; Canada Tire's many
+                warehouses are grouped under a single parent with a searchable
+                expandable list so 16 checkboxes never dominate the sidebar. */}
+            <AccordionGroup
+              title="Distributors"
+              badge={activeDistributors.size > 0 ? <span className="filter-badge">{activeDistributors.size}</span> : null}
+            >
+              <div className="flex flex-col gap-2">
+                {distributorOptions.filter(opt => !opt.id.startsWith('ct:') && opt.id !== 'canadaTire').map(opt => (
+                  <label key={opt.id} className="flex items-center gap-2 cursor-pointer">
                     <input
                       type="checkbox"
                       checked={activeDistributors.has(opt.id)}
@@ -1444,11 +1485,57 @@ ${stockText}
                     <span className="text-sm">{opt.label}</span>
                   </label>
                 ))}
+                {distributorOptions.some(opt => opt.id.startsWith('ct:')) && (
+                  <div className="border-t border-slate-100 pt-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <label className="flex items-center gap-2 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={activeDistributors.has('canadaTire')}
+                          onChange={() => toggleDistributor('canadaTire')}
+                          className="rounded"
+                        />
+                        <span className="text-sm font-medium">Canada Tire</span>
+                      </label>
+                      <button
+                        type="button"
+                        className="text-xs text-accent font-medium whitespace-nowrap"
+                        onClick={() => setCtExpanded(e => !e)}
+                      >
+                        {ctExpanded ? 'Hide warehouses' : `${distributorOptions.filter(o => o.id.startsWith('ct:')).length} warehouses`}
+                      </button>
+                    </div>
+                    {ctExpanded && (
+                      <div className="mt-2">
+                        <input
+                          className="input text-xs mb-2"
+                          placeholder="Search warehouses…"
+                          value={ctWarehouseSearch}
+                          onChange={(e) => setCtWarehouseSearch(e.target.value)}
+                        />
+                        <div className="flex flex-col gap-1.5 max-h-44 overflow-y-auto">
+                          {distributorOptions
+                            .filter(opt => opt.id.startsWith('ct:') && opt.label.toLowerCase().includes(ctWarehouseSearch.toLowerCase()))
+                            .map(opt => (
+                              <label key={opt.id} className="flex items-center gap-2 cursor-pointer">
+                                <input
+                                  type="checkbox"
+                                  checked={activeDistributors.has(opt.id)}
+                                  onChange={() => toggleDistributor(opt.id)}
+                                  className="rounded"
+                                />
+                                <span className="text-xs">{opt.label.replace(/^Canada Tire — /, '')}</span>
+                              </label>
+                            ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
-            </div>
+            </AccordionGroup>
 
-            <div>
-              <p className="text-xs font-semibold text-muted mb-2 uppercase">Tier</p>
+            <AccordionGroup title="Tier" defaultOpen>
               <div className="flex flex-wrap gap-2">
                 {Object.entries(TIERS).map(([key, label]) => (
                   <label key={key} className="flex items-center gap-2 cursor-pointer">
@@ -1462,10 +1549,9 @@ ${stockText}
                   </label>
                 ))}
               </div>
-            </div>
+            </AccordionGroup>
 
-            <div>
-              <p className="text-xs font-semibold text-muted mb-2 uppercase">Category</p>
+            <AccordionGroup title="Category" defaultOpen>
               <div className="flex flex-wrap gap-2">
                 {Object.entries(CATEGORIES).map(([key, label]) => (
                   <label key={key} className="flex items-center gap-2 cursor-pointer">
@@ -1479,10 +1565,12 @@ ${stockText}
                   </label>
                 ))}
               </div>
-            </div>
+            </AccordionGroup>
 
-            <div>
-              <p className="text-xs font-semibold text-muted mb-2 uppercase">Wheel Bolt Pattern</p>
+            <AccordionGroup
+              title="Wheels (bolt, diameter, width)"
+              badge={(activeBoltPatterns.size + activeDiameters.size + activeWidths.size) > 0 ? <span className="filter-badge">{activeBoltPatterns.size + activeDiameters.size + activeWidths.size}</span> : null}
+            >
               <div className="flex flex-wrap gap-2">
                 {boltPatterns.map(bp => (
                   <button
@@ -1543,17 +1631,18 @@ ${stockText}
                           color: activeWidths.has(wd) ? '#fff' : '#334155',
                           fontFamily: 'monospace', cursor: 'pointer',
                         }}
-                      >
-                        {wd}
-                      </button>
-                    ))}
-                  </div>
+                      >                    {wd}
+                  </button>
+                ))}
+              </div>
                 </div>
               )}
-            </div>
+            </AccordionGroup>
 
-            <div>
-              <p className="text-xs font-semibold text-muted mb-2 uppercase">Vehicle Fitment</p>
+            <AccordionGroup
+              title="Vehicle Fitment"
+              badge={activeFitments.size > 0 ? <span className="filter-badge">{activeFitments.size}</span> : null}
+            >
               <div className="flex flex-wrap gap-2 items-center">
                 {fitments.map(f => (
                   <button
@@ -1593,10 +1682,9 @@ ${stockText}
                   </button>
                 )}
               </div>
-            </div>
+            </AccordionGroup>
 
-            <div>
-              <p className="text-xs font-semibold text-muted mb-2 uppercase">Season</p>
+            <AccordionGroup title="Season">
               <div className="flex flex-wrap gap-2">
                 {SEASONS.map(s => (
                   <label key={s} className="flex items-center gap-2 cursor-pointer">
@@ -1610,11 +1698,25 @@ ${stockText}
                   </label>
                 ))}
               </div>
-            </div>
-          </div>
+            </AccordionGroup>
+        </aside>
+
+        {/* === RIGHT COLUMN: quote options + quote + results === */}
+        <div className="filter-main flex flex-col gap-6">
 
           {/* === VEHICLE & INSTALLATION OPTIONS === */}
-          <div className="flex gap-3 flex-wrap items-end">
+          <div className="card p-4 md:p-6">
+            <div className="flex gap-3 flex-wrap items-end">
+              <div>
+                <label className="text-xs font-semibold text-muted mb-1 block uppercase">Item Size (PDF)</label>
+                <input
+                  type="text"
+                  className="input w-44 font-mono"
+                  placeholder="e.g. 205/55R16"
+                  value={pdfTireSize}
+                  onChange={(e) => setPdfTireSize(e.target.value)}
+                />
+              </div>
             <div>
               <label className="text-xs font-semibold text-muted mb-1 block uppercase">Vehicle Type</label>
               <select
@@ -1762,9 +1864,8 @@ ${stockText}
               <Download className="w-4 h-4" />
               PDF ({quoteItems.length})
             </button>
+            </div>
           </div>
-        </div>
-      </div>
 
       {/* === EMAIL QUOTE MODAL === */}
       {showEmailModal && emailDraft && (
@@ -3072,12 +3173,18 @@ ${stockText}
                   </div>
                   <div className="flex justify-between items-center mt-1">
                     <span className="text-xs">
-                      {singleActiveLocation
-                        ? `Avail @ ${singleActiveLocation}: ${getTireStock(tire)}`
-                        : `Avail: ${getTireStock(tire)}`}
-                      {' '}<span className={`badge ${getTireStock(tire) === 0 ? 'badge-outofstock' : 'badge-available'}`} style={{padding:'0 0.375rem'}}>
-                        {getTireStock(tire) === 0 ? 'Out of stock' : 'In stock'}
-                      </span>
+                      {singleActiveLocation ? `Avail @ ${singleActiveLocation}: ` : 'Stock: '}
+                      {(() => {
+                        // Color-coded availability: green = healthy (>10),
+                        // orange = low (1–3 relative to a 4-tire quote), red = out.
+                        const s = getTireStock(tire);
+                        const color = s === 0 ? '#dc2626' : s < 4 ? '#ea580c' : s <= 10 ? '#ca8a04' : '#16a34a';
+                        return (
+                          <span className="font-bold" style={{ color }}>
+                            {s === 0 ? 'Out of stock (0)' : s < 4 ? `Low — only ${s}` : s}
+                          </span>
+                        );
+                      })()}
                     </span>
                     <span className="text-xs opacity-60">Tires: {formatCurrency(tiresSubtotal)}{showInstall && installTotal > 0 ? ` + Install: ${formatCurrency(installTaxInclusive)}` : ''}{showInstall && travelSurcharge > 0 ? ` + Travel: ${formatCurrency(travelSurcharge)}` : ''}</span>
                   </div>
@@ -3134,6 +3241,8 @@ ${stockText}
           )}
         </div>
       )}
+        </div>{/* /right column */}
+      </div>{/* /layout flex */}
     </div>
   );
 }
