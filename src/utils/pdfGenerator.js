@@ -282,13 +282,19 @@ export function generateOptionsPDF({
       sizeCell = `${tire.size} · Fits: ${tire.fitment}`;
     }
 
+    // Qty column carries the human quantity string: bundles read "4 tires"
+    // (each bundle = 4 tires + 4 rims at Qty 1), everything else is numeric.
+    const qtyCell = tire.isBundle
+      ? (itemQty === 1 ? '4 tires' : `${itemQty * 4} tires (${itemQty} sets)`)
+      : String(itemQty != null ? itemQty : tire.stock);
+
     const row = [
       CAT_LABEL[tire.category || 'tire'] || 'Tire',
       tire.brand,
       tire.model,
       sizeCell,
       tire.season || '—',
-      String(itemQty != null ? itemQty : tire.stock),
+      qtyCell,
       formatCurrency(tirePrice),  // effective price (sale while active, else regular)
     ];
     if (showPeriod) row.push(salePeriod);               // e.g. "Aug 1 – 15" or "until Aug 15"
@@ -418,14 +424,21 @@ export function generateOptionsPDF({
         else if (cat === 'service') cell.textColor = [22, 130, 93];
         else cell.textColor = [40, 40, 40];
       }
-      // Bundles: split the Model cell into two readable lines — rim SKU on
-      // the first line, tire brand/model + "Bundle" on the second.
+      // Bundles: split the Model cell into two lines — the tire name on the
+      // first line, the wheel/SKU on the second ("TIRE × WHEEL" layout).
+      // Bundle model strings are built as "<SKU> × <size> <brand> <model> Bundle".
       if (section === 'body' && colIdx === col.model) {
         const raw = String(cell.raw || '');
-        const m = raw.match(/^(.{0,24}?\bS[A-Z0-9]{4,8}) × (.+)$/i);
-        if (m) {
-          cell.text = [m[1], `× ${m[2]}`];
+        const bundle = raw.match(/^(\S{4,12})\s+×\s+(.+?)\s+Bundle$/i);
+        if (bundle) {
+          cell.text = [bundle[2], `× ${bundle[1]} Bundle`];
           cell.styles.fontStyle = 'bold';
+        } else {
+          const m = raw.match(/^(.{0,24}?\bS[A-Z0-9]{4,8}) × (.+)$/i);
+          if (m) {
+            cell.text = [m[1], `× ${m[2]}`];
+            cell.styles.fontStyle = 'bold';
+          }
         }
       }
     },
@@ -475,63 +488,56 @@ export function generateOptionsPDF({
     doc.setFontSize(8);
     const notes = [];
 
-    // Installation-service line items (customer-supplied tires)
-    tires.filter(t => t.isService && !t.isBundle && !t.isBundleInstall).forEach(t => {
-      notes.push(`• ${t.brand} ${t.model}: ${t.serviceDesc || 'installation'} — ${formatCurrency(t.servicePerUnit || 0)} per ${t.serviceUnit || 'tire'} × ${t.serviceQty || 1} ${t.serviceUnit || 'tire'}${(t.serviceQty || 1) === 1 ? '' : 's'}, quoted as one job`);
-    });
-
-    // Bundles: each row IS one bundle (4 tires + 4 rims, Qty 1), with the
-    // per-set installation fee shown in the Install column. Internal-only
-    // details (e.g. the 10% discount) are never printed here.
+    // Bundles: one single global note replaces all the repetitive bullets —
+    // the install fee is already visible per-row in the Install column.
     const bundleItems = tires.filter(t => t.isBundle);
     const bundleInstallLine = tires.find(t => t.isBundleInstall);
     const bundleRate = (bundleItems[0] && Number(bundleItems[0].installRate)) || (bundleInstallLine && bundleInstallLine.bundleInstallRate) || 0;
     if (bundleItems.length > 0) {
-      if (bundleRate > 0 && includeInstallation) {
-        notes.push(`• All ${bundleItems.length} bundle option${bundleItems.length === 1 ? '' : 's'} include a ${formatCurrency(bundleRate)}/set installation fee (off-rims mounting, balancing, valve stems) — shown in the Install column`);
-      } else {
-        notes.push(`• Bundle prices cover 4 tires + 4 rims per bundle — installation not included`);
+      notes.push(`• All bundle options include a ${formatCurrency(bundleRate)}/set installation fee, quoted as a single job.`);
+    } else {
+      // Installation-service line items (customer-supplied tires)
+      tires.filter(t => t.isService && !t.isBundle && !t.isBundleInstall).forEach(t => {
+        notes.push(`• ${t.brand} ${t.model}: ${t.serviceDesc || 'installation'} — ${formatCurrency(t.servicePerUnit || 0)} per ${t.serviceUnit || 'tire'} × ${t.serviceQty || 1} ${t.serviceUnit || 'tire'}${(t.serviceQty || 1) === 1 ? '' : 's'}, quoted as one job`);
+      });
+
+      // Only add installation notes if installation is included. The 10%
+      // QuickRev discount is an internal detail — never shown to the customer.
+      if (includeInstallation && !bundleInstallLine) {
+        notes.push(`• Installation includes off-rims mounting, balancing, and valve stems`);
+      } else if (!includeInstallation && !bundleInstallLine) {
+        notes.push(`• Installation not included — ask for installation rates`);
       }
+
+      // TPMS sensors: flat per-sensor programming fee (different from tire install rates)
+      // Only mention it when the TPMS fee is NOT overridden per-item.
+      if (tires.some(t => isTpmsItem(t) && (t.installFee == null || t.installFee === ''))) {
+        notes.push(`• TPMS sensor programming: ${formatCurrency(TPMS_PROGRAM_FEE)} per sensor (flat rate)`);
+      }
+
+      // Sale notes — active sales (with period + regular price) and pending sales
+      onSaleRows.forEach(row => {
+        notes.push(`• ${row.label}: on sale ${formatCurrency(row.salePrice)} (regular ${formatCurrency(row.regularPrice)})${row.end ? ` until ${row.end.toLocaleDateString()}` : ''} — regular price applies after the sale ends`);
+      });
+      pendingSaleRows.forEach(row => {
+        const s = row.sale;
+        notes.push(`• ${row.label}: sale of ${formatCurrency(s.salePrice)} ${s.saleEnd && s.saleEnd < new Date() ? `ended ${s.saleEnd.toLocaleDateString()}` : `starts ${s.saleStart ? s.saleStart.toLocaleDateString() : 'soon'}`} — regular price applies now`);
+      });
+
+      // Free items note
+      tires.forEach(t => {
+        if (t && t.isFree) notes.push(`• ${t.brand} ${t.model} (${t.size}): free item`);
+      });
+
+      // Travel surcharge note
+      if (travelSurcharge > 0) {
+        notes.push(`• Travel surcharge of ${formatCurrency(travelSurcharge)} applies${postalCode ? ` for postal code ${postalCode.toUpperCase()}` : ''} — per job, not per tire`);
+      } else if (postalCode) {
+        notes.push(`• No travel surcharge for postal code ${postalCode.toUpperCase()}`);
+      }
+
+      notes.push(`• Stock levels are estimates and subject to change`);
     }
-
-    // Only add installation notes if installation is included. The 10%
-    // QuickRev discount is an internal detail — never shown to the customer.
-    if (bundleItems.length) {
-      // Bundle notes above already cover installation either way.
-    } else if (includeInstallation && !bundleInstallLine) {
-      notes.push(`• Installation includes off-rims mounting, balancing, and valve stems`);
-    } else if (!includeInstallation && !bundleInstallLine) {
-      notes.push(`• Installation not included — ask for installation rates`);
-    }
-
-    // TPMS sensors: flat per-sensor programming fee (different from tire install rates)
-    // Only mention it when the TPMS fee is NOT overridden per-item.
-    if (tires.some(t => isTpmsItem(t) && (t.installFee == null || t.installFee === ''))) {
-      notes.push(`• TPMS sensor programming: ${formatCurrency(TPMS_PROGRAM_FEE)} per sensor (flat rate)`);
-    }
-
-    // Sale notes — active sales (with period + regular price) and pending sales
-    onSaleRows.forEach(row => {
-      notes.push(`• ${row.label}: on sale ${formatCurrency(row.salePrice)} (regular ${formatCurrency(row.regularPrice)})${row.end ? ` until ${row.end.toLocaleDateString()}` : ''} — regular price applies after the sale ends`);
-    });
-    pendingSaleRows.forEach(row => {
-      const s = row.sale;
-      notes.push(`• ${row.label}: sale of ${formatCurrency(s.salePrice)} ${s.saleEnd && s.saleEnd < new Date() ? `ended ${s.saleEnd.toLocaleDateString()}` : `starts ${s.saleStart ? s.saleStart.toLocaleDateString() : 'soon'}`} — regular price applies now`);
-    });
-
-    // Free items note
-    tires.forEach(t => {
-      if (t && t.isFree) notes.push(`• ${t.brand} ${t.model} (${t.size}): free item`);
-    });
-
-    // Travel surcharge note
-    if (travelSurcharge > 0) {
-      notes.push(`• Travel surcharge of ${formatCurrency(travelSurcharge)} applies${postalCode ? ` for postal code ${postalCode.toUpperCase()}` : ''} — per job, not per tire`);
-    } else if (postalCode) {
-      notes.push(`• No travel surcharge for postal code ${postalCode.toUpperCase()}`);
-    }
-
-    notes.push(`• Stock levels are estimates and subject to change`);
 
     // Each note renders on ONE line: anything too long is truncated with an
     // ellipsis instead of wrapping into the next note's space.

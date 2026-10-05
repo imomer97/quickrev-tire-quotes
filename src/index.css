@@ -516,21 +516,97 @@ body {
   line-height: 16px;
 }
 
-.filter-layout { display: flex; flex-direction: column; gap: 1.5rem; width: 100%; }
+.filter-layout { display: grid; grid-template-columns: 1fr; gap: 1.5rem; width: 100%; align-items: start; }
 .filter-sidebar { width: 100%; }
-.filter-main { width: 100%; }
+.filter-main { width: 100%; min-width: 0; }
+
+/* Sticky search bar at the top of the results column */
+.search-sticky {
+  position: sticky;
+  top: 52px;
+  z-index: 30;
+}
+
 @media (min-width: 1024px) {
-  .filter-layout { flex-direction: row; align-items: flex-start; }
+  /* Global two-column layout: fixed 280px filter rail + fluid results column */
+  .filter-layout {
+    grid-template-columns: 280px 1fr;
+  }
   .filter-sidebar {
-    flex: 0 0 280px;
-    width: 280px;
     position: sticky;
-    top: 128px;
-    max-height: calc(100vh - 150px);
+    top: 60px;
+    max-height: calc(100vh - 76px);
     overflow-y: auto;
   }
-  .filter-main { flex: 1 1 0%; min-width: 0; }
 }
+
+/* === Product card: horizontal cost breakdown =========================== */
+.cost-strip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.35rem 1.25rem;
+}
+.cost-chip {
+  display: flex;
+  flex-direction: column;
+  gap: 0.0625rem;
+  min-width: 0;
+}
+.cost-label {
+  font-size: 0.625rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #64748b;
+  white-space: nowrap;
+}
+.cost-value {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.8125rem;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.cost-total {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  border-top: 2px solid var(--border);
+  padding-top: 0.4rem;
+}
+/* The final number dwarfs the breakdown chips above it */
+.cost-final {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 1.75rem;
+  font-weight: 800;
+  line-height: 1.1;
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Inline action row: Add to Quote (3fr) + Copy Text (1fr) on one line */
+.card-actions {
+  display: grid;
+  grid-template-columns: 3fr 1fr;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+/* Standardized pill treatment for raw tags (Winter, affordable, canadaTire…) */
+.badge-pill {
+  padding: 0.1875rem 0.625rem;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  line-height: 1.2;
+  text-transform: capitalize;
+  white-space: nowrap;
+}
+
+/* Color-coded stock indicator: green >10, orange 1–9, red 0 */
+.stock-indicator { font-variant-numeric: tabular-nums; }
+.stock-ok   { color: #16a34a; }
+.stock-low  { color: #ea580c; }
+.stock-out  { color: #dc2626; }
 
 /* Print styles for PDF */
 @media print {

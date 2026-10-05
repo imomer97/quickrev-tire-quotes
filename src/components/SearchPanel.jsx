@@ -1377,89 +1377,6 @@ ${stockText}
 
   return (
     <div className="flex-col gap-6">
-      {/* === STICKY SEARCH BAR & ADD TIRE === */}
-      <div className="card p-4 z-30" style={{ position: 'sticky', top: 52 }}>
-        <div className="flex flex-col gap-3">
-          {/* Live equivalence hint: typing an imperial (flotation) size shows its
-              metric conversion instantly, e.g. "35X12.50R20 → also matching 318/60R20".
-              Reverse direction too: typing a metric size shows the closest flotation size. */}
-          {searchSize && imperialToMetric(searchSize) ? (
-            <p className="text-xs text-muted -mb-1">
-              <span className="font-semibold">Equivalent size:</span>{' '}
-              <span className="font-mono">{imperialToMetric(searchSize)}</span>
-              {' '}(metric tires with this size are included in the results)
-            </p>
-          ) : null}
-          <div className="flex gap-3 flex-wrap">
-            <div className="relative flex-1 min-w-64">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-muted" />
-              <input
-                type="text"
-                className="input pl-10"
-                placeholder="Search tire size (e.g., 205/55R16)..."
-                value={searchSize}
-                onChange={(e) => setSearchSize(e.target.value)}
-              />
-            </div>
-            <input
-              type="number"
-              className="input w-20"
-              placeholder="Qty"
-              min="1"
-              max="20"
-              title="Number of new tires being quoted"
-              value={quantity}
-              onChange={(e) => {
-                const q = Math.max(1, parseInt(e.target.value) || 4);
-                setQuantity(q);
-                // Keep the install count in step with quantity until the user overrides it
-                if (installQty === quantity) setInstallQty(q);
-              }}
-            />
-            <input
-              type="number"
-              className="input w-20"
-              placeholder="Install"
-              min="0"
-              max="20"
-              title="Number of tires to be installed"
-              value={installQty}
-              onChange={(e) => setInstallQty(Math.max(0, parseInt(e.target.value) || 0))}
-            />
-            <button 
-              className="btn btn-success"
-              onClick={() => setShowAddModal(true)}
-              title="Add a new item manually (tire, wheel, or part)"
-            >
-              <Plus className="w-4 h-4" />
-              Add Item
-            </button>
-            <button
-              className="btn btn-primary"
-              onClick={openInstallServiceModal}
-              disabled={!vehicleType}
-              title="Quote the installation service by itself (customer's own tires) — uses the installation calculator"
-            >
-              <Wrench className="w-4 h-4" />
-              Install Service
-            </button>
-            <button
-              className="btn btn-outline"
-              onClick={resetFilters}
-              title="Clear the search box and every active filter"
-            >
-              <X className="w-4 h-4" />
-              Reset Filters
-            </button>
-          </div>
-
-          {/* === SEARCH HELP TEXT === */}
-          <p className="text-xs text-muted ml-1">
-            💡 Search by size (205/55R16, 20555R16, or 2055516), brand, or model. Filters live in the left sidebar.
-          </p>
-        </div>
-      </div>
-
       <div className="filter-layout">
         {/* === FILTER SIDEBAR === */}
         <aside className="filter-sidebar card p-3 flex flex-col gap-2">
@@ -1737,8 +1654,91 @@ ${stockText}
             </AccordionGroup>
         </aside>
 
-        {/* === RIGHT COLUMN: quote options + quote + results === */}
+        {/* === RIGHT COLUMN: sticky search bar + quote options + quote + results === */}
         <div className="filter-main flex flex-col gap-6">
+
+          {/* === STICKY SEARCH BAR & ADD TIRE === */}
+          <div className="card p-4 z-30 search-sticky">
+            <div className="flex flex-col gap-3">
+              {/* Live equivalence hint: typing an imperial (flotation) size shows its
+                  metric conversion instantly, e.g. "35X12.50R20 → also matching 318/60R20".
+                  Reverse direction too: typing a metric size shows the closest flotation size. */}
+              {searchSize && imperialToMetric(searchSize) ? (
+                <p className="text-xs text-muted -mb-1">
+                  <span className="font-semibold">Equivalent size:</span>{' '}
+                  <span className="font-mono">{imperialToMetric(searchSize)}</span>
+                  {' '}(metric tires with this size are included in the results)
+                </p>
+              ) : null}
+              <div className="flex gap-3 flex-wrap">
+                <div className="relative flex-1 min-w-64">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-muted" />
+                  <input
+                    type="text"
+                    className="input pl-10"
+                    placeholder="Search tire size (e.g., 205/55R16)..."
+                    value={searchSize}
+                    onChange={(e) => setSearchSize(e.target.value)}
+                  />
+                </div>
+                <input
+                  type="number"
+                  className="input w-20"
+                  placeholder="Qty"
+                  min="1"
+                  max="20"
+                  title="Number of new tires being quoted"
+                  value={quantity}
+                  onChange={(e) => {
+                    const q = Math.max(1, parseInt(e.target.value) || 4);
+                    setQuantity(q);
+                    // Keep the install count in step with quantity until the user overrides it
+                    if (installQty === quantity) setInstallQty(q);
+                  }}
+                />
+                <input
+                  type="number"
+                  className="input w-20"
+                  placeholder="Install"
+                  min="0"
+                  max="20"
+                  title="Number of tires to be installed"
+                  value={installQty}
+                  onChange={(e) => setInstallQty(Math.max(0, parseInt(e.target.value) || 0))}
+                />
+                <button
+                  className="btn btn-success"
+                  onClick={() => setShowAddModal(true)}
+                  title="Add a new item manually (tire, wheel, or part)"
+                >
+                  <Plus className="w-4 h-4" />
+                  Add Item
+                </button>
+                <button
+                  className="btn btn-primary"
+                  onClick={openInstallServiceModal}
+                  disabled={!vehicleType}
+                  title="Quote the installation service by itself (customer's own tires) — uses the installation calculator"
+                >
+                  <Wrench className="w-4 h-4" />
+                  Install Service
+                </button>
+                <button
+                  className="btn btn-outline"
+                  onClick={resetFilters}
+                  title="Clear the search box and every active filter"
+                >
+                  <X className="w-4 h-4" />
+                  Reset Filters
+                </button>
+              </div>
+
+              {/* === SEARCH HELP TEXT === */}
+              <p className="text-xs text-muted ml-1">
+                💡 Search by size (205/55R16, 20555R16, or 2055516), brand, or model. Filters live in the left sidebar.
+              </p>
+            </div>
+          </div>
 
           {/* === VEHICLE & INSTALLATION OPTIONS === */}
           <div className="card p-4 md:p-6">
@@ -2878,14 +2878,14 @@ ${stockText}
                 </div>
 
                 {/* Size & Badges */}
-                <div className="flex items-center gap-2 mb-3 flex-wrap">
+                <div className="flex items-center gap-1.5 mb-3 flex-wrap">
                   {/* Category badge — leads the row so the customer can scan tires vs.
                       wheels/rims vs. parts at a glance. Absent/legacy items render as "Tire". */}
-                  <span className={`badge badge-category-${getCategory(tire)}`}>
+                  <span className={`badge badge-pill badge-category-${getCategory(tire)}`}>
                     {CATEGORIES[getCategory(tire)]}
                   </span>
                   {!isEditing ? (
-                    <span className="badge badge-gray font-mono">
+                    <span className="badge badge-pill badge-gray font-mono">
                       {formatSize(tire.size, tire)}
                       {showMetricEquiv && imperialToMetric(tire.size) ? (
                         <span className="text-muted"> · {imperialToMetric(tire.size)}</span>
@@ -2901,7 +2901,7 @@ ${stockText}
                   )}
                   {/* Fitment tag — editable inline, shown on the PDF for wheels/parts */}
                   {!isEditing ? (
-                    tire.fitment ? <span className="badge badge-gray" title="Vehicle fitment">{tire.fitment}</span> : null
+                    tire.fitment ? <span className="badge badge-pill badge-gray" title="Vehicle fitment">{tire.fitment}</span> : null
                   ) : (
                     <input
                       className="input text-sm w-40"
@@ -2962,9 +2962,9 @@ ${stockText}
                       </select>
                     )}
                   </span>
-                  <span className="badge badge-gray">{!isEditing ? tire.tier : getTierForBrand(editForm.distributorId || tire.distributorId, editForm.brand || tire.brand)}</span>
+                  <span className="badge badge-pill badge-gray">{!isEditing ? tire.tier : getTierForBrand(editForm.distributorId || tire.distributorId, editForm.brand || tire.brand)}</span>
                   {!isEditing ? (
-                    <span className="badge badge-gray">{tire.distributorId}</span>
+                    <span className="badge badge-pill badge-gray">{tire.distributorId}</span>
                   ) : (
                     <select
                       className="input text-sm"
@@ -3097,90 +3097,76 @@ ${stockText}
                   </div>
                 )}
 
-                {/* FIXED: Price Breakdown with Installation Tax Included */}
+                {/* FIXED: Price Breakdown with Installation Tax Included —
+                    compact horizontal strip: one line of chips + one big total. */}
                 <div className="bg-slate-50 rounded-lg p-3 mb-3">
-                  <p className="text-xs font-semibold mb-2 uppercase tracking-wide" style={{ color: isB2B ? '#16a34a' : undefined }}>
-                    Cost Breakdown (per item){isB2B && ' — B2B'}</p>
-
-                  {/* Tire Only */}
-                  <div className="price-row">
-                    <span className="text-sm">Wholesale (purchase)</span>
-                    <span className="text-sm font-mono">{formatCurrency(tire.wholesale)}</span>
-                  </div>
-                  {calc.envFee > 0 && (
-                    <div className="price-row">
-                      <span className="text-sm">+ Env fee</span>
-                      <span className="text-sm font-mono text-success">{formatCurrency(calc.envFee)}</span>
-                    </div>
-                  )}
-                  <div className="price-row">
-                    <span className="text-sm font-medium">Purchase cost</span>
-                    <span className="text-sm font-mono font-medium">{formatCurrency(calc.purchaseCost)}</span>
-                  </div>
-                  <div className="border-t my-1" />
-                  {calc.category === 'tire' && (
-                    <div className="price-row">
-                      <span className="text-sm">+ Markup</span>
-                      <span className="text-sm font-mono text-success">{formatCurrency(calc.retailPrice - calc.purchaseCost)}</span>
-                    </div>
-                  )}
-                  <div className="price-row">
-                    <span className="text-sm font-medium">
-                      {calc.category === 'tire' ? 'Tire (pre-tax)' : calc.category === 'wheel' ? 'Item price (pre-tax)' : 'Part price (pre-tax)'}
-                      {calc.sale.saleActive && <span className="text-xs text-warning ml-1">Sale!</span>}
+                  <div className="cost-strip">
+                    <span className="cost-chip">
+                      <span className="cost-label">Wholesale</span>
+                      <span className="cost-value">{formatCurrency(tire.wholesale)}</span>
                     </span>
-                    <span className="text-sm font-mono font-medium">
-                      {calc.sale.saleActive ? (
-                        <>
-                          <span className="line-through text-muted mr-1">{formatCurrency(calc.regularPrice)}</span>
-                          {formatCurrency(calc.retailPrice)}
-                        </>
-                      ) : (
-                        formatCurrency(calc.retailPrice)
-                      )}
+                    {calc.envFee > 0 && (
+                      <span className="cost-chip">
+                        <span className="cost-label">+ Env fee</span>
+                        <span className="cost-value text-success">{formatCurrency(calc.envFee)}</span>
+                      </span>
+                    )}
+                    <span className="cost-chip">
+                      <span className="cost-label">Purchase</span>
+                      <span className="cost-value">{formatCurrency(calc.purchaseCost)}</span>
+                    </span>
+                    {calc.category === 'tire' && (
+                      <span className="cost-chip">
+                        <span className="cost-label">+ Markup</span>
+                        <span className="cost-value text-success">{formatCurrency(calc.retailPrice - calc.purchaseCost)}</span>
+                      </span>
+                    )}
+                    <span className="cost-chip">
+                      <span className="cost-label">
+                        {calc.category === 'tire' ? 'Tire (pre-tax)' : calc.category === 'wheel' ? 'Item (pre-tax)' : 'Part (pre-tax)'}
+                        {calc.sale.saleActive && <span className="text-warning"> · Sale!</span>}
+                      </span>
+                      <span className="cost-value">
+                        {calc.sale.saleActive ? (
+                          <>
+                            <span className="line-through text-muted mr-1">{formatCurrency(calc.regularPrice)}</span>
+                            {formatCurrency(calc.retailPrice)}
+                          </>
+                        ) : (
+                          formatCurrency(calc.retailPrice)
+                        )}
+                      </span>
+                    </span>
+                    {showInstall && tire.includeInstall !== false && calc.installPerTire > 0 && (
+                      <span className="cost-chip">
+                        <span className="cost-label">+ Install</span>
+                        <span className="cost-value">
+                          {formatCurrency(calc.installPerTire)}
+                          {buyFromQuickRev && <span className="text-success text-xs ml-1">(-10%)</span>}
+                        </span>
+                      </span>
+                    )}
+                    <span className="cost-chip">
+                      <span className="cost-label">Subtotal</span>
+                      <span className="cost-value">{formatCurrency(calc.totalPreTax)}</span>
+                    </span>
+                    <span className="cost-chip">
+                      <span className="cost-label">+ HST ({(HST_RATE * 100).toFixed(0)}%)</span>
+                      <span className="cost-value text-warning">{formatCurrency(calc.totalHST)}</span>
                     </span>
                   </div>
                   {/* When a sale is set but not active, show why the regular price applies */}
                   {calc.sale.salePrice && !calc.sale.saleActive && (
-                    <div className="price-row">
-                      <span className="text-xs text-muted">
-                        {calc.sale.saleEnd && calc.sale.saleEnd < new Date()
-                          ? `Sale ended ${calc.sale.saleEnd.toLocaleDateString()} — regular price applies`
-                          : `Sale of ${formatCurrency(calc.sale.salePrice)} starts ${calc.sale.saleStart ? calc.sale.saleStart.toLocaleDateString() : 'soon'}`}
-                      </span>
-                    </div>
+                    <p className="text-xs text-muted mt-1">
+                      {calc.sale.saleEnd && calc.sale.saleEnd < new Date()
+                        ? `Sale ended ${calc.sale.saleEnd.toLocaleDateString()} — regular price applies`
+                        : `Sale of ${formatCurrency(calc.sale.salePrice)} starts ${calc.sale.saleStart ? calc.sale.saleStart.toLocaleDateString() : 'soon'}`}
+                    </p>
                   )}
-
-                  {/* Installation Pre-Tax (NEW) */}
-                  {showInstall && tire.includeInstall !== false && calc.installPerTire > 0 && (
-                    <>
-                      <div className="price-row">
-                        <span className="text-sm">+ Installation (pre-tax)</span>
-                        <span className="text-sm font-mono">
-                          {formatCurrency(calc.installPerTire)}
-                          {buyFromQuickRev && <span className="text-success text-xs ml-1">(-10%)</span>}
-                        </span>
-                      </div>
-                    </>
-                  )}
-
-                  {/* Combined Pre-Tax (NEW) */}
-                  <div className="border-t my-1" />
-                  <div className="price-row font-medium">
-                    <span className="text-sm">Subtotal (before HST)</span>
-                    <span className="text-sm font-mono font-bold">{formatCurrency(calc.totalPreTax)}</span>
-                  </div>
-
-                  {/* HST on Combined (NEW) */}
-                  <div className="price-row">
-                    <span className="text-sm">+ HST ({(HST_RATE * 100).toFixed(0)}%)</span>
-                    <span className="text-sm font-mono text-warning">{formatCurrency(calc.totalHST)}</span>
-                  </div>
-
-                  {/* Final Total (FIXED) */}
-                  <div className="price-row total mt-2">
-                    <span>Total per tire</span>
-                    <span className="text-lg font-bold text-accent">{formatCurrency(calc.totalPerTire)}</span>
+                  {/* Final Total — intentionally much larger than the breakdown above */}
+                  <div className="cost-total mt-2">
+                    <span className="text-sm font-semibold">Total per tire{isB2B && ' — B2B'}</span>
+                    <span className="cost-final">{formatCurrency(calc.totalPerTire)}</span>
                   </div>
                 </div>
 
@@ -3211,13 +3197,13 @@ ${stockText}
                     <span className="text-xs">
                       {singleActiveLocation ? `Avail @ ${singleActiveLocation}: ` : 'Stock: '}
                       {(() => {
-                        // Color-coded availability: green = healthy (>10),
-                        // orange = low (1–3 relative to a 4-tire quote), red = out.
+                        // Color-coded availability per shop standard:
+                        // green = healthy (>10), orange = low (1–9), red = out (0).
                         const s = getTireStock(tire);
-                        const color = s === 0 ? '#dc2626' : s < 4 ? '#ea580c' : s <= 10 ? '#ca8a04' : '#16a34a';
+                        const cls = s === 0 ? 'stock-out' : s <= 9 ? 'stock-low' : 'stock-ok';
                         return (
-                          <span className="font-bold" style={{ color }}>
-                            {s === 0 ? 'Out of stock (0)' : s < 4 ? `Low — only ${s}` : s}
+                          <span className={`font-bold stock-indicator ${cls}`}>
+                            {s === 0 ? 'Out of stock (0)' : s <= 9 ? `Low — only ${s}` : s}
                           </span>
                         );
                       })()}
@@ -3247,10 +3233,10 @@ ${stockText}
                   )}
                 </div>
 
-                {/* Actions */}
-                <div className="flex gap-2 items-center">
+                {/* Actions — inline on one row: primary (3fr) + copy (1fr) */}
+                <div className="card-actions">
                   <button
-                    className="btn btn-primary flex-1 btn-sm"
+                    className="btn btn-primary btn-sm"
                     onClick={() => addOneToQuote(tire)}
                     disabled={inQuote}
                     title={inQuote ? 'Already in the quote' : 'Add this item to the quote'}
@@ -3258,7 +3244,7 @@ ${stockText}
                     <Plus className="w-4 h-4" />
                     {inQuote ? 'In Quote' : 'Add to Quote'}
                   </button>
-                  <button className="btn btn-secondary flex-1 btn-sm" onClick={() => copyQuote(tire)}>
+                  <button className="btn btn-secondary btn-sm" onClick={() => copyQuote(tire)}>
                     <Download className="w-4 h-4" />
                     Copy Text
                   </button>
