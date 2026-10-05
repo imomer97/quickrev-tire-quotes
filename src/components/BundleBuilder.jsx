@@ -1,10 +1,11 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Package, Search, ShoppingCart, CheckSquare, Square } from 'lucide-react';
 import {
   parseTireSize,
   parseWheelSize,
   formatCurrency,
   getEffectiveRetail,
+  lookupRimUnitPrice,
 } from '../data/distributors.js';
 
 /**
@@ -133,7 +134,18 @@ export default function BundleBuilder({ tires = [], fitments = [], pricingConfig
 
   const selectedRim = rimOptions.find(r => r.sku === selectedSku) || null;
 
-  const rimUnitNum = Math.max(0, parseFloat(rimUnit) || 0);
+  // Auto-fill the rim price from the catalog: the wheel item whose SKU matches
+  // the selected rim SKU. The manual input overrides the lookup when filled.
+  const catalogRimPrice = useMemo(
+    () => lookupRimUnitPrice(tires, selectedSku),
+    [tires, selectedSku]
+  );
+  // Pre-fill the input once per selected rim (manual edits afterwards win).
+  useEffect(() => {
+    if (catalogRimPrice != null) setRimUnit(catalogRimPrice.toFixed(2));
+  }, [catalogRimPrice, selectedSku]);
+
+  const rimUnitNum = Math.max(0, parseFloat(rimUnit) || catalogRimPrice || 0);
 
   // Rim specs from the catalog: find the wheel item whose SKU/model matches
   // the selected rim SKU and pull diameter×width, bolt pattern, and centre
@@ -192,7 +204,9 @@ export default function BundleBuilder({ tires = [], fitments = [], pricingConfig
       tireName: brandModel,
       tireUnit: +retail.toFixed(2),
       rimUnit: +rimUnitNum.toFixed(2),
+      // Per-bundle install rate — rendered in the PDF Install/ea column.
       installRate: +installRate.toFixed(2),
+      includeInstall: true,
       quoteQty: 1,
       _transient: true,
     };
@@ -201,40 +215,20 @@ export default function BundleBuilder({ tires = [], fitments = [], pricingConfig
   // Installation line for bundles: one $X/set fee per job, added alongside
   // the bundle lines when Include Installation is enabled. The 10% discount
   // note is internal — never shown on the customer PDF.
-  const buildBundleInstallItem = (count) => ({
-    id: `bundle-install-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-    category: 'service',
-    brand: 'QuickRev',
-    model: 'Installation',
-    size: `${normInput} · ${count} set${count === 1 ? '' : 's'}`,
-    price: +(installRate * count).toFixed(2),
-    season: 'None',
-    tier: 'service',
-    stock: 1,
-    includeInstall: false,
-    isService: true,
-    isBundleInstall: true,
-    bundleInstallRate: +installRate.toFixed(2),
-    serviceDesc: 'bundle installation',
-    servicePerUnit: +installRate.toFixed(2),
-    serviceUnit: 'set',
-    serviceQty: count,
-    quoteQty: 1,
-    _transient: true,
-  });
+  // Installation is shown per-row in the PDF's Install column — the old
+  // separate "$X/set installation" quote line is no longer added.
 
   const flashAdded = (n) => {
-    const inst = includeInstallation ? ` plus one ${formatCurrency(installRate)}/set installation line` : '';
+    const inst = includeInstallation ? ` including ${formatCurrency(installRate)}/set installation` : '';
     setAddedMsg(`Added ${n} bundle${n === 1 ? '' : 's'} to the quote${inst} — open Search & Quote to generate the PDF.`);
     setTimeout(() => setAddedMsg(null), 4000);
   };
 
   const pushBundles = (items) => {
     if (!onAddBundles || items.length === 0) return;
-    const all = [...items];
-    // One installation line ($X/set × number of bundles) when installs are on.
-    if (includeInstallation) all.push(buildBundleInstallItem(items.length));
-    onAddBundles(all);
+    // Installation shows as the per-row Install column on the PDF now —
+    // no separate installation line item anymore.
+    onAddBundles(items);
     flashAdded(items.length);
   };
 

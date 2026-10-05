@@ -183,7 +183,9 @@ export function generateOptionsPDF({
   const anySale = tires.some(t => typeof t.salePrice === 'number' && t.salePrice > 0);
   const showPeriod = anySale;
   const anyInstall = tires.some(t =>
-    includeInstallation && t.includeInstall !== false && (isTpmsItem(t) || !!parseInstallSize(t))
+    // Bundles always carry their per-set install rate in the column.
+    t.isBundle ? includeInstallation && t.includeInstall !== false && (t.installRate || 0) > 0
+      : includeInstallation && t.includeInstall !== false && (isTpmsItem(t) || !!parseInstallSize(t))
   );
   const showInstallCol = includeInstallation && anyInstall;
 
@@ -211,8 +213,11 @@ export function generateOptionsPDF({
     // or explicit opt-out) are excluded. TPMS sensors are the exception: they
     // carry a flat per-sensor programming fee instead of the size-based rate.
     const tpms = isTpmsItem(tire);
-    // Bundles never take the install-column math: their price is the full
-    // 4-tires + 4-rims bundle, and installation rides on its own line.
+    // Bundles: the per-set installation fee rides in the Install column and
+    // is added to the row total — no separate installation line item.
+    const bundleInstall = tire.isBundle && includeInstallation && tire.includeInstall !== false
+      ? (Number(tire.installRate) || 0)
+      : 0;
     const installEligible = !tire.isBundle && includeInstallation && tire.includeInstall !== false && (
       tpms || !!parsed
     );
@@ -220,7 +225,12 @@ export function generateOptionsPDF({
     let totalHST;
     let grandTotal;
 
-    if (installEligible) {
+    if (tire.isBundle) {
+      // Bundle row: price = (tires×4 + rims×4) + install×1 set, all with HST.
+      const preTax = tirePrice * itemQty + bundleInstall;
+      totalHST = preTax * HST_RATE;
+      grandTotal = preTax + totalHST;
+    } else if (installEligible) {
       // Per-item override > TPMS flat fee > size-based tire rate
       installPerTire = getInstallFeeForItem(tire, parsed, vehicleType, buyFromQuickRev);
       // Installation applies only to the number of tires to be installed (installQty)
@@ -282,9 +292,13 @@ export function generateOptionsPDF({
       formatCurrency(tirePrice),  // effective price (sale while active, else regular)
     ];
     if (showPeriod) row.push(salePeriod);               // e.g. "Aug 1 – 15" or "until Aug 15"
-    if (showInstallCol) row.push(installPerTire > 0 ? formatCurrency(installPerTire) : '—');  // Installation / programming (per item)
+    if (showInstallCol) row.push(
+      tire.isBundle
+        ? (bundleInstall > 0 ? formatCurrency(bundleInstall) : '—')
+        : (installPerTire > 0 ? formatCurrency(installPerTire) : '—')
+    );  // Installation / programming (per item, per set for bundles)
     row.push(formatCurrency(totalHST), formatCurrency(grandTotal));
-    return { cells: row, price: tirePrice, isFree: !!tire.isFree, preTax: tirePrice * itemQty + (installEligible ? installPerTire * installQty : 0), totalHST };
+    return { cells: row, price: tirePrice, isFree: !!tire.isFree, preTax: tire.isBundle ? tirePrice * itemQty + bundleInstall : tirePrice * itemQty + (installEligible ? installPerTire * installQty : 0), totalHST };
   });
 
   // Default order for customers: by effective price per tire, lowest first,
@@ -434,9 +448,12 @@ export function generateOptionsPDF({
 
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(7);
-    const breakdownNote = includeInstallation
-      ? `Quote covers ${quantity} item(s); installation applies to ${installQty} of the installable tires. Each price includes item cost (pre-tax) + installation (pre-tax, where applicable) + 14% HST on both. HST applies to installation.${travelSurcharge > 0 ? ` A travel surcharge of ${formatCurrency(travelSurcharge)} applies per job.` : ''}`
-      : `Each price includes: item cost + 14% HST. Installation not included.`;
+    const hasBundles = tires.some(t => t.isBundle);
+    const breakdownNote = hasBundles
+      ? `Bundle rows cover 4 tires + 4 rims per set${includeInstallation ? ' plus installation' : ''}; each price includes item cost (pre-tax) + installation where applicable + 14% HST. HST applies to installation.`
+      : includeInstallation
+        ? `Quote covers ${quantity} item(s); installation applies to ${installQty} of the installable tires. Each price includes item cost (pre-tax) + installation (pre-tax, where applicable) + 14% HST on both. HST applies to installation.${travelSurcharge > 0 ? ` A travel surcharge of ${formatCurrency(travelSurcharge)} applies per job.` : ''}`
+        : `Each price includes: item cost + 14% HST. Installation not included.`;
 
     const breakdownLines = doc.splitTextToSize(breakdownNote, pageWidth - margin * 2);
     breakdownLines.forEach(line => {
@@ -463,14 +480,15 @@ export function generateOptionsPDF({
       notes.push(`• ${t.brand} ${t.model}: ${t.serviceDesc || 'installation'} — ${formatCurrency(t.servicePerUnit || 0)} per ${t.serviceUnit || 'tire'} × ${t.serviceQty || 1} ${t.serviceUnit || 'tire'}${(t.serviceQty || 1) === 1 ? '' : 's'}, quoted as one job`);
     });
 
-    // Bundles: each row IS one bundle (4 tires + 4 rims, Qty 1). When an
-    // installation line is present, one global note covers all options.
-    // Internal-only details (e.g. the 10% discount) are never printed here.
+    // Bundles: each row IS one bundle (4 tires + 4 rims, Qty 1), with the
+    // per-set installation fee shown in the Install column. Internal-only
+    // details (e.g. the 10% discount) are never printed here.
     const bundleItems = tires.filter(t => t.isBundle);
     const bundleInstallLine = tires.find(t => t.isBundleInstall);
+    const bundleRate = (bundleItems[0] && Number(bundleItems[0].installRate)) || (bundleInstallLine && bundleInstallLine.bundleInstallRate) || 0;
     if (bundleItems.length > 0) {
-      if (bundleInstallLine) {
-        notes.push(`• All ${bundleItems.length} bundle option${bundleItems.length === 1 ? '' : 's'} include a ${formatCurrency(bundleInstallLine.bundleInstallRate || bundleInstallLine.servicePerUnit || 0)}/set installation fee, quoted as a single job (off-rims mounting, balancing, valve stems)`);
+      if (bundleRate > 0 && includeInstallation) {
+        notes.push(`• All ${bundleItems.length} bundle option${bundleItems.length === 1 ? '' : 's'} include a ${formatCurrency(bundleRate)}/set installation fee (off-rims mounting, balancing, valve stems) — shown in the Install column`);
       } else {
         notes.push(`• Bundle prices cover 4 tires + 4 rims per bundle — installation not included`);
       }
@@ -478,9 +496,11 @@ export function generateOptionsPDF({
 
     // Only add installation notes if installation is included. The 10%
     // QuickRev discount is an internal detail — never shown to the customer.
-    if (includeInstallation && !bundleInstallLine && !bundleItems.length) {
+    if (bundleItems.length) {
+      // Bundle notes above already cover installation either way.
+    } else if (includeInstallation && !bundleInstallLine) {
       notes.push(`• Installation includes off-rims mounting, balancing, and valve stems`);
-    } else if (!includeInstallation && !bundleItems.length) {
+    } else if (!includeInstallation && !bundleInstallLine) {
       notes.push(`• Installation not included — ask for installation rates`);
     }
 

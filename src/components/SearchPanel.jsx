@@ -148,8 +148,39 @@ import {
   TPMS_PROGRAM_FEE,
   isTpmsItem,
   getInstallFeeForItem,
+  lookupRimUnitPrice,
 } from '../data/distributors.js';
 import { generateOptionsPDF } from '../utils/pdfGenerator.js';
+
+/**
+ * Migrate stale bundle quote items (pre rim-price rework): backfill rimUnit
+ * from the catalog wheel price, recompute price = tires×4 + rims×4, and
+ * collapse the quantity back to one bundle per row (bundleQty 1).
+ */
+function migrateBundleItems(items, catalog, bundleInstallRate = 0) {
+  return (items || []).filter(item => item && !item.isBundleInstall) // old separate installation lines are gone
+    .map(item => {
+    if (!item || !item.isBundle) return item;
+    // Recover the per-tire price: stored value > catalog lookup by size+name > price/4.
+    let tireUnit = Number(item.tireUnit);
+    if (!Number.isFinite(tireUnit) || tireUnit <= 0) {
+      const size = String(item.tireSize || '').trim().toUpperCase();
+      const name = String(item.tireName || '').trim().toUpperCase();
+      const match = (catalog || []).find(t => t && t.category !== 'wheel' && (!size || String(t.size || '').trim().toUpperCase() === size) && (!name || String(`${t.brand || ''} ${t.model || ''}`).trim().toUpperCase().includes(name)));
+      tireUnit = match ? getEffectiveRetail(match) : NaN;
+    }
+    if (!Number.isFinite(tireUnit) || tireUnit <= 0) tireUnit = (Number(item.price) || 0) / 4;
+    let rimUnit = item.rimUnit != null ? Number(item.rimUnit) : NaN;
+    if (!Number.isFinite(rimUnit) || rimUnit <= 0) {
+      rimUnit = lookupRimUnitPrice(catalog, item.rimSku) || 0;
+    }
+    if (!Number.isFinite(rimUnit) || rimUnit < 0) rimUnit = 0;
+    const price = +(tireUnit * 4 + rimUnit * 4).toFixed(2);
+    const installRate = Number(item.installRate) > 0 ? Number(item.installRate) : (Number(bundleInstallRate) || 0);
+    if (item.bundleQty === 1 && item.rimUnit === +rimUnit.toFixed(2) && Math.abs((Number(item.price) || 0) - price) < 0.005 && Number(item.installRate) > 0 && item.includeInstall === true) return item;
+    return { ...item, tireUnit: +tireUnit.toFixed(2), rimUnit: +rimUnit.toFixed(2), price, bundleQty: 1, quoteQty: 1, installRate, includeInstall: true };
+  });
+}
 import { useQuoteHistory, loadEmailTemplate, saveEmailTemplate, renderEmailTemplate, DEFAULT_EMAIL_TEMPLATE } from '../hooks/useQuoteHistory.js';
 
 export default function SearchPanel({ tires, updateTire, deleteTire, addTire, bulkUpdateTires, warehouseLocations, distributors, onAddDistributor, preload, onPreloadConsumed, pricingConfig, setPricingConfig, pendingBundles, onPendingBundlesConsumed }) {
@@ -270,11 +301,13 @@ export default function SearchPanel({ tires, updateTire, deleteTire, addTire, bu
   // Items deliberately "added to the quote" survive search/filter changes.
   // Each entry is a snapshot of the tire so the quote stays intact even if the
   // catalog is edited or the item is deleted later.
+  // Stale bundle items (added before the rim-price rework) are migrated on
+  // load: backfill rimUnit from the catalog wheel price, recompute the
+  // bundle price, and collapse Qty back to 1 bundle per row.
   const [quoteItems, setQuoteItems] = useState(() => {
-    // Restore the quote after a reload — items were chosen deliberately
     try {
       const stored = JSON.parse(localStorage.getItem('quickrev_quote_items') || '[]');
-      return Array.isArray(stored) ? stored : [];
+      return Array.isArray(stored) ? migrateBundleItems(stored, tires, pricingConfig && pricingConfig.bundleInstallRate) : [];
     } catch { return []; }
   });
   // When true, the user has manually dragged items into a custom order, which
