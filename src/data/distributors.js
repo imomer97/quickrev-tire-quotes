@@ -453,15 +453,17 @@ export function getSaleInfo(tire) {
 
 /** The price a customer actually pays today (sale while active, else regular) */
 /**
- * Find a catalog wheel item matching a rim SKU (exact SKU/model match) and
- * return its effective retail price — used to auto-price bundle rims.
+ * Find a catalog item matching a rim SKU and return its effective retail
+ * price — used to auto-price bundle rims. Matched by exact SKU (or SKU inside
+ * the model name); category is not required since rim items in the catalog
+ * are sometimes stored as "Tires" rather than "Wheels / Rims".
  */
 export function lookupRimUnitPrice(tires, rimSku) {
   const sku = String(rimSku || '').trim().toUpperCase();
   if (!sku) return null;
-  const wheel = (tires || []).find(t => t && (t.category === 'wheel') && (
+  const wheel = (tires || []).find(t => t && (
     String(t.sku || '').trim().toUpperCase() === sku
-    || String(t.model || '').trim().toUpperCase() === sku
+    || String(t.model || '').toUpperCase().split(/[^A-Z0-9]+/).includes(sku)
   ));
   if (!wheel) return null;
   const price = getEffectiveRetail(wheel);

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Package, Search, ShoppingCart, CheckSquare, Square } from 'lucide-react';
 import {
   parseTireSize,
@@ -134,16 +134,13 @@ export default function BundleBuilder({ tires = [], fitments = [], pricingConfig
 
   const selectedRim = rimOptions.find(r => r.sku === selectedSku) || null;
 
-  // Auto-fill the rim price from the catalog: the wheel item whose SKU matches
-  // the selected rim SKU. The manual input overrides the lookup when filled.
+  // Rim price comes straight from the catalog: the wheel item whose SKU
+  // matches the selected rim SKU. The manual input is ONLY for rims that
+  // aren't in the catalog — it overrides the lookup when filled.
   const catalogRimPrice = useMemo(
     () => lookupRimUnitPrice(tires, selectedSku),
     [tires, selectedSku]
   );
-  // Pre-fill the input once per selected rim (manual edits afterwards win).
-  useEffect(() => {
-    if (catalogRimPrice != null) setRimUnit(catalogRimPrice.toFixed(2));
-  }, [catalogRimPrice, selectedSku]);
 
   const rimUnitNum = Math.max(0, parseFloat(rimUnit) || catalogRimPrice || 0);
 
@@ -329,18 +326,35 @@ export default function BundleBuilder({ tires = [], fitments = [], pricingConfig
         </div>
         <div>
           <label className={label}>Rim price ($ / wheel)</label>
-          <input
-            type="number"
-            step="0.01"
-            min="0"
-            className={inputCls}
-            placeholder="e.g. 99.00"
-            value={rimUnit}
-            onChange={e => setRimUnit(e.target.value)}
-          />
-          <p className="text-xs text-muted mt-1">
-            Bundle price = 4 tires + 4 rims{rimUnitNum > 0 ? ` (+${formatCurrency(rimUnitNum * 4)}/bundle for rims)` : ' — enter the rim cost'}.
-          </p>
+          {selectedSku && catalogRimPrice != null ? (
+            // Rim is a catalog item — price is pulled automatically.
+            <div>
+              <div className="input w-full bg-gray-50 text-muted">{formatCurrency(catalogRimPrice)} <span className="text-xs">(from catalog)</span></div>
+              <p className="text-xs text-muted mt-1">
+                Rim price pulled from the catalog item — no entry needed.
+                Bundle price = 4 tires + 4 rims (+{formatCurrency(catalogRimPrice * 4)}/bundle for rims).
+              </p>
+            </div>
+          ) : (
+            // Rim not in the catalog — ask for a price.
+            <div>
+              <input
+                type="number"
+                step="0.01"
+                min="0"
+                className={inputCls}
+                placeholder="e.g. 99.00"
+                value={rimUnit}
+                onChange={e => setRimUnit(e.target.value)}
+              />
+              <p className="text-xs text-muted mt-1">
+                {selectedSku
+                  ? 'Rim not found in the catalog — enter the price per wheel.'
+                  : 'Pick a rim SKU first; catalog rims price themselves.'}
+                {rimUnitNum > 0 ? ` Bundle price = 4 tires + 4 rims (+${formatCurrency(rimUnitNum * 4)}/bundle for rims).` : ''}
+              </p>
+            </div>
+          )}
         </div>
         <div className="md:col-span-5">
           <label className="flex items-center gap-2 cursor-pointer">
