@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Package, Search, ShoppingCart } from 'lucide-react';
+import { Package, Search, ShoppingCart, CheckSquare, Square } from 'lucide-react';
 import {
   parseTireSize,
   formatCurrency,
@@ -32,6 +32,10 @@ export default function BundleBuilder({ tires = [], fitments = [], pricingConfig
   const [warehouse, setWarehouse] = useState(''); // '' = all warehouses (stock sums)
   const [inStockOnly, setInStockOnly] = useState(false);
   const [minStock, setMinStock] = useState(4);
+  // Season filter (multi-select, matches the catalog's season values)
+  const [activeSeasons, setActiveSeasons] = useState(new Set());
+  // Multi-select: bundle rows the user ticked for a mixed quote
+  const [selectedIds, setSelectedIds] = useState(new Set());
 
   const parsed = parseTireSize(sizeInput);
   const diameter = parsed ? parsed.rim : null;
@@ -91,18 +95,28 @@ export default function BundleBuilder({ tires = [], fitments = [], pricingConfig
     return tire.stock || 0;
   };
 
+  // Seasons present in the catalog for this size (drives the filter chips).
+  const seasonOptions = useMemo(() => {
+    const set = new Set();
+    for (const t of tires) {
+      if (t && (!normInput || normSize(t) === normInput) && t.season) set.add(t.season);
+    }
+    return [...set].sort();
+  }, [tires, normInput]);
+
   // Tire options from the catalog that match the entered size exactly
-  // (normalized), filtered by category, distributor, and availability.
+  // (normalized), filtered by category, distributor, season, and availability.
   const tireOptions = useMemo(() => {
     if (!normInput) return [];
     return tires
       .filter(t => t && normSize(t) === normInput)
       .filter(t => !category || (t.category || 'tire') === category)
       .filter(t => !distributorFilter || t.distributorId === distributorFilter)
+      .filter(t => activeSeasons.size === 0 || activeSeasons.has(t.season || 'None'))
       .filter(t => !inStockOnly || stockOf(t) >= minStock)
       .map(t => ({ tire: t, retail: getEffectiveRetail(t) || 0 }))
       .sort((a, b) => a.retail - b.retail);
-  }, [tires, normInput, category, distributorFilter, inStockOnly, minStock, warehouse]);
+  }, [tires, normInput, category, distributorFilter, activeSeasons, inStockOnly, minStock, warehouse]);
 
   const totalMatches = useMemo(() => (
     normInput
@@ -168,6 +182,27 @@ export default function BundleBuilder({ tires = [], fitments = [], pricingConfig
     if (!onAddBundles || tireOptions.length === 0) return;
     onAddBundles(tireOptions.map(buildBundleItem));
     flashAdded(tireOptions.length);
+  };
+
+  // === MULTI-SELECT ===
+  // Tick the bundles you want, then "Add selected" — lets you build a mixed
+  // quote (e.g. one winter + one all-season option) without adding everything.
+  const toggleSelect = (id) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+  const toggleSelectAll = () => {
+    setSelectedIds(prev => (prev.size > 0 ? new Set() : new Set(tireOptions.map(o => o.tire.id))));
+  };
+  const addSelected = () => {
+    if (!onAddBundles || selectedIds.size === 0) return;
+    const picks = tireOptions.filter(o => selectedIds.has(o.tire.id));
+    onAddBundles(picks.map(buildBundleItem));
+    flashAdded(picks.length);
+    setSelectedIds(new Set());
   };
 
   const label = 'text-sm font-medium mb-1 block text-primary';
@@ -238,8 +273,8 @@ export default function BundleBuilder({ tires = [], fitments = [], pricingConfig
         </div>
       </div>
 
-      {/* Step 2: catalog filters (distributor, warehouse, availability) */}
-      <div className="card p-4 mb-5 grid grid-cols-1 md:grid-cols-4 gap-3">
+      {/* Step 2: catalog filters (distributor, warehouse, availability, season) */}
+      <div className="card p-4 mb-5">
         <div>
           <label className={label}>Distributor</label>
           <select className={inputCls} value={distributorFilter} onChange={e => setDistributorFilter(e.target.value)}>
@@ -272,6 +307,42 @@ export default function BundleBuilder({ tires = [], fitments = [], pricingConfig
             onChange={e => setMinStock(Math.max(0, parseInt(e.target.value) || 0))}
           />
         </div>
+        {seasonOptions.length > 0 && (
+          <div className="md:col-span-4">
+            <label className={label}>Season</label>
+            <div className="flex flex-wrap gap-2">
+              {seasonOptions.map(s => {
+                const on = activeSeasons.has(s);
+                return (
+                  <button
+                    key={s}
+                    type="button"
+                    onClick={() => setActiveSeasons(prev => {
+                      const next = new Set(prev);
+                      if (next.has(s)) next.delete(s); else next.add(s);
+                      return next;
+                    })}
+                    style={{
+                      padding: '2px 10px', fontSize: '0.75rem', borderRadius: 6,
+                      border: '1px solid ' + (on ? '#0f172a' : '#cbd5e1'),
+                      background: on ? '#0f172a' : '#fff',
+                      color: on ? '#fff' : '#334155',
+                      cursor: 'pointer',
+                    }}
+                    title={on ? `Click to stop filtering by ${s}` : `Show only ${s} tires`}
+                  >
+                    {s}
+                  </button>
+                );
+              })}
+              {activeSeasons.size > 0 && (
+                <button type="button" className="text-xs text-danger font-medium" onClick={() => setActiveSeasons(new Set())}>
+                  Clear
+                </button>
+              )}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Bundle rows */}
@@ -299,15 +370,33 @@ export default function BundleBuilder({ tires = [], fitments = [], pricingConfig
               : `${tireOptions.length} of ${totalMatches} option(s) for ${normInput} (filtered)`}
             {warehouse ? ` · ${warehouse}` : ''}
           </span>
-          <button className="btn btn-sm btn-primary" onClick={addAll} disabled={!onAddBundles}>
-            <ShoppingCart className="w-4 h-4" />
-            Add all to quote
-          </button>
+          <div className="flex items-center gap-2">
+            {selectedIds.size > 0 && (
+              <button className="btn btn-sm btn-primary" onClick={addSelected} disabled={!onAddBundles} title="Add only the ticked bundles to the quote">
+                <ShoppingCart className="w-4 h-4" />
+                Add selected ({selectedIds.size})
+              </button>
+            )}
+            <button className="btn btn-sm btn-outline" onClick={toggleSelectAll} title="Tick every visible bundle (or untick all)">
+              {selectedIds.size > 0 ? 'Deselect all' : 'Select all'}
+            </button>
+            <button className="btn btn-sm btn-primary" onClick={addAll} disabled={!onAddBundles}>
+              <ShoppingCart className="w-4 h-4" />
+              Add all to quote
+            </button>
+          </div>
         </div>
         <div className="card overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
               <tr className="text-left border-b border-slate-200 text-xs uppercase text-muted">
+                <th className="px-2 py-2 w-8">
+                  <button type="button" onClick={toggleSelectAll} title={selectedIds.size > 0 ? 'Deselect all' : 'Select all'} style={{ cursor: 'pointer' }}>
+                    {selectedIds.size > 0
+                      ? <CheckSquare className="w-4 h-4 text-accent" />
+                      : <Square className="w-4 h-4 text-muted" />}
+                  </button>
+                </th>
                 <th className="px-3 py-2">Bundle</th>
                 <th className="px-3 py-2">Brand / Model</th>
                 <th className="px-3 py-2">Size</th>
@@ -323,7 +412,18 @@ export default function BundleBuilder({ tires = [], fitments = [], pricingConfig
               {tireOptions.map(({ tire, retail }) => {
                 const bundleName = `${selectedRim ? selectedRim.sku : '? SKU'} × ${normInput} ${[tire.brand, tire.model].filter(Boolean).join(' ')} Bundle`.trim();
                 return (
-                  <tr key={tire.id} className="border-b border-slate-100 last:border-0 hover:bg-slate-50/50">
+                  <tr
+                    key={tire.id}
+                    className="border-b border-slate-100 last:border-0 hover:bg-slate-50/50"
+                    style={selectedIds.has(tire.id) ? { background: '#eff6ff' } : undefined}
+                  >
+                    <td className="px-2 py-2">
+                      <button type="button" onClick={() => toggleSelect(tire.id)} title="Tick to include this bundle in 'Add selected'" style={{ cursor: 'pointer' }}>
+                        {selectedIds.has(tire.id)
+                          ? <CheckSquare className="w-4 h-4 text-accent" />
+                          : <Square className="w-4 h-4 text-muted" />}
+                      </button>
+                    </td>
                     <td className="px-3 py-2 font-semibold text-primary">{bundleName}</td>
                     <td className="px-3 py-2">{[tire.brand, tire.model].filter(Boolean).join(' ') || '—'}</td>
                     <td className="px-3 py-2 whitespace-nowrap">
