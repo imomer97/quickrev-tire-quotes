@@ -191,6 +191,8 @@ export function generateOptionsPDF({
 
   // One-word category tabs for the first table column (see table headers below)
   const CAT_LABEL = { tire: 'Tire', wheel: 'Wheel', part: 'Part', service: 'Service' };
+  // Bundles get their own tab — "Service" is misleading for a tire+wheel set.
+  const rowCategory = t => (t.isBundle ? 'Bundle' : (CAT_LABEL[t.category || 'tire'] || 'Tire'));
 
   const rowMeta = tires.map(tire => {
     // A tire size or a wheel size both make an item installable — this mirrors
@@ -282,14 +284,14 @@ export function generateOptionsPDF({
       sizeCell = `${tire.size} · Fits: ${tire.fitment}`;
     }
 
-    // Qty column carries the human quantity string: bundles read "4 tires"
-    // (each bundle = 4 tires + 4 rims at Qty 1), everything else is numeric.
+    // Qty column: bundles are quoted per set — one bundle = 4 tires + 4 rims.
+    // Show the set count, with the piece breakdown for multi-set rows.
     const qtyCell = tire.isBundle
-      ? (itemQty === 1 ? '4 tires' : `${itemQty * 4} tires (${itemQty} sets)`)
+      ? (itemQty === 1 ? '1 bundle' : `${itemQty} bundles (4 tires + 4 rims each)`)
       : String(itemQty != null ? itemQty : tire.stock);
 
     const row = [
-      CAT_LABEL[tire.category || 'tire'] || 'Tire',
+      rowCategory(tire),
       tire.brand,
       tire.model,
       sizeCell,
@@ -348,30 +350,31 @@ export function generateOptionsPDF({
   // With BOTH extra columns the fixed set alone would overflow, so a compact
   // set is used (156mm) and the body font drops to 7.5pt so long names still fit.
   const bothExtras = showPeriod && showInstallCol;
+  // Qty column fits "1 bundle" / "4 tires" on one line (bundles + normal rows).
   const columnStyles = bothExtras
     ? {
-        [col.category]: { cellWidth: 11 },
+        [col.category]: { cellWidth: 13 },
         [col.brand]: { cellWidth: 22 },
-        [col.size]: { cellWidth: 27 },
-        [col.season]: { cellWidth: 20 },
-        [col.stock]: { cellWidth: 11 },
+        [col.size]: { cellWidth: 26 },
+        [col.season]: { cellWidth: 19 },
+        [col.stock]: { cellWidth: 13 },
         [col.price]: { cellWidth: 16 },
       }
     : showInstallCol || showPeriod
       ? {
-          [col.category]: { cellWidth: 10 },
+          [col.category]: { cellWidth: 12 },
           [col.brand]: { cellWidth: 22 },
-          [col.size]: { cellWidth: 29 },
-          [col.season]: { cellWidth: 20 },
-          [col.stock]: { cellWidth: 10 },
+          [col.size]: { cellWidth: 28 },
+          [col.season]: { cellWidth: 19 },
+          [col.stock]: { cellWidth: 13 },
           [col.price]: { cellWidth: 15 },
         }
       : {
           [col.category]: { cellWidth: 15 },
           [col.brand]: { cellWidth: 22 },
-          [col.size]: { cellWidth: 27 },
-          [col.season]: { cellWidth: 20 },
-          [col.stock]: { cellWidth: 12 },
+          [col.size]: { cellWidth: 26 },
+          [col.season]: { cellWidth: 19 },
+          [col.stock]: { cellWidth: 14 },
           [col.price]: { cellWidth: 17 },
         };
   if (showPeriod) columnStyles[col.period] = { cellWidth: 21 };
@@ -422,6 +425,7 @@ export function generateOptionsPDF({
         if (cat === 'wheel') cell.textColor = [32, 86, 185];
         else if (cat === 'part') cell.textColor = [214, 80, 41];
         else if (cat === 'service') cell.textColor = [22, 130, 93];
+        else if (cat === 'bundle') cell.textColor = [124, 58, 237]; // purple
         else cell.textColor = [40, 40, 40];
       }
       // Bundles: split the Model cell into two lines — the tire name on the

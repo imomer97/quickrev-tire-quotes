@@ -180,7 +180,8 @@ export default function BundleBuilder({ tires = [], fitments = [], pricingConfig
     return {
       id: `bundle-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       category: 'service',
-      brand: 'QuickRev',
+      // The PDF Brand column shows the actual tire brand — not "QuickRev".
+      brand: tire.brand || '',
       // Nice PDF label, e.g. "STX81257H × 225/50R18 OVATION WV-688 Bundle"
       model: `${rimSku ? `${rimSku} × ` : ''}${normInput}${brandModel ? ` ${brandModel}` : ''} Bundle`,
       // Size column: tire size + rim spec (e.g. 18x8 · 5X112 · CB72.6).
